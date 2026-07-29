@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
   ChevronLeft, ChevronRight, Plus, Search, SlidersHorizontal, X, Clock,
-  MapPin, Bell, Repeat, Copy, Trash2, Pencil, Check,
+  MapPin, Bell, Repeat, Copy, Trash2, Pencil, Check, BarChart3,
   Download, Upload, Menu, ChevronDown, CalendarDays, ArrowLeft, Palette
 } from "lucide-react";
 
@@ -414,12 +414,14 @@ export default function CalendarApp() {
   const [activeCats, setActiveCats] = useState([]);
 
   const [menuOpen, setMenuOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
   const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [newCatName, setNewCatName] = useState("");
   const [newCatColor, setNewCatColor] = useState("blue");
   const [bulkColorOpen, setBulkColorOpen] = useState(false);
   const [bulkGroupKey, setBulkGroupKey] = useState(null);
   const [toast, setToast] = useState("");
+  const fileInputRef = useRef(null);
   const csvInputRef = useRef(null);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2200); };
@@ -557,6 +559,19 @@ export default function CalendarApp() {
     showToast("Backup exportado");
   };
 
+  const importJSON = (file) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result);
+        if (Array.isArray(parsed.events)) setEvents(parsed.events);
+        if (Array.isArray(parsed.categories)) setCategories(parsed.categories);
+        showToast("Backup importado");
+      } catch (e) { showToast("Arquivo inválido"); }
+    };
+    reader.readAsText(file);
+  };
+
   /* Parses CSV text into an array of row-arrays, respecting quoted fields
      (handles commas and escaped quotes inside "..."). */
   const parseCSVRows = (text) => {
@@ -674,6 +689,27 @@ export default function CalendarApp() {
     touchRef.current = null;
   };
 
+  /* ------------------------------------------------------------------ */
+  /* Stats                                                                */
+  /* ------------------------------------------------------------------ */
+  const statsData = useMemo(() => {
+    const now = new Date();
+    const weekStart = startOfWeek(now), weekEnd = addDays(weekStart, 6);
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const countIn = (start, end) => {
+      const counts = {};
+      for (const ev of events) {
+        const d = parseKey(ev.date);
+        if (d >= start && d <= end) {
+          const key = ev.categoryId || "sem-categoria";
+          counts[key] = (counts[key] || 0) + 1;
+        }
+      }
+      return counts;
+    };
+    return { week: countIn(weekStart, weekEnd), month: countIn(monthStart, monthEnd) };
+  }, [events]);
 
   if (!loaded) {
     return (
@@ -936,6 +972,11 @@ export default function CalendarApp() {
           </div>
         </Sheet>
 
+        {/* Stats */}
+        <Sheet open={statsOpen} onClose={() => setStatsOpen(false)} title="Estatísticas">
+          <StatsPanel data={statsData} categories={categories} categoryById={categoryById} />
+        </Sheet>
+
         {/* Menu */}
         <Sheet open={menuOpen} onClose={() => setMenuOpen(false)} title="Menu">
           <div className="flex flex-col gap-1 pt-1">
@@ -945,9 +986,17 @@ export default function CalendarApp() {
             <button onClick={() => { setBulkGroupKey(null); setBulkColorOpen(true); setMenuOpen(false); }} className="flex items-center gap-3 px-2 py-3 text-sm">
               <Palette size={17} /> Mudar cor em massa
             </button>
+            <button onClick={() => { setStatsOpen(true); setMenuOpen(false); }} className="flex items-center gap-3 px-2 py-3 text-sm">
+              <BarChart3 size={17} /> Estatísticas
+            </button>
             <button onClick={exportJSON} className="flex items-center gap-3 px-2 py-3 text-sm">
               <Download size={17} /> Exportar backup (JSON)
             </button>
+            <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-3 px-2 py-3 text-sm">
+              <Upload size={17} /> Importar backup (JSON)
+            </button>
+            <input ref={fileInputRef} type="file" accept="application/json" className="hidden"
+              onChange={(e) => { if (e.target.files[0]) importJSON(e.target.files[0]); e.target.value = ""; setMenuOpen(false); }} />
             <button onClick={() => csvInputRef.current?.click()} className="flex items-center gap-3 px-2 py-3 text-sm">
               <Upload size={17} /> Importar eventos (CSV)
             </button>
@@ -1091,7 +1140,7 @@ function MonthView({ cursorDate, eventsByDate, selectedDate, isLight, onSelectDa
                       return (
                         <span key={ev.id}
                           title={ev.title}
-                          className={`text-[9px] leading-[11px] font-medium px-1 py-[1px] rounded w-full text-left whitespace-normal break-words line-clamp-2 ${
+                          className={`text-[9px] leading-tight font-medium px-1 py-[1px] rounded truncate w-full text-left ${
                             isSelected ? "bg-white/25 text-white" : `${c.soft} ${c.text}`
                           }`}>
                           {ev.title}
@@ -1192,6 +1241,48 @@ function DayView({ dateKey, events, isLight, categoryById, onEventClick, onSlotC
             </button>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Stats panel                                                          */
+/* ------------------------------------------------------------------ */
+
+function StatsPanel({ data, categories, categoryById }) {
+  const renderBars = (counts) => {
+    const entries = Object.entries(counts);
+    const max = Math.max(1, ...entries.map(([, v]) => v));
+    if (entries.length === 0) return <p className="text-sm text-neutral-500">Nenhum evento neste período.</p>;
+    return (
+      <div className="flex flex-col gap-2.5">
+        {entries.sort((a, b) => b[1] - a[1]).map(([catId, count]) => {
+          const cat = categoryById[catId];
+          const c = colorOf(cat?.color || "gray");
+          return (
+            <div key={catId} className="flex items-center gap-3">
+              <span className="text-xs w-20 truncate text-neutral-400">{cat ? cat.name : "Sem categoria"}</span>
+              <div className="flex-1 h-2.5 rounded-full bg-neutral-700 overflow-hidden">
+                <div className={`h-full ${c.dot}`} style={{ width: `${(count / max) * 100}%` }} />
+              </div>
+              <span className="text-xs text-neutral-400 w-4 text-right">{count}</span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  return (
+    <div className="flex flex-col gap-6 pt-1">
+      <div>
+        <h3 className="text-sm font-medium text-neutral-300 mb-3">Esta semana</h3>
+        {renderBars(data.week)}
+      </div>
+      <div>
+        <h3 className="text-sm font-medium text-neutral-300 mb-3">Este mês</h3>
+        {renderBars(data.month)}
       </div>
     </div>
   );
