@@ -420,6 +420,7 @@ export default function CalendarApp() {
   const [newCatColor, setNewCatColor] = useState("blue");
   const [toast, setToast] = useState("");
   const fileInputRef = useRef(null);
+  const csvInputRef = useRef(null);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2200); };
 
@@ -542,6 +543,78 @@ export default function CalendarApp() {
         if (Array.isArray(parsed.categories)) setCategories(parsed.categories);
         showToast("Backup importado");
       } catch (e) { showToast("Arquivo inválido"); }
+    };
+    reader.readAsText(file);
+  };
+
+  /* Parses CSV text into an array of row-arrays, respecting quoted fields
+     (handles commas and escaped quotes inside "..."). */
+  const parseCSVRows = (text) => {
+    const rows = [];
+    let row = [];
+    let field = "";
+    let inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (inQuotes) {
+        if (ch === '"') {
+          if (text[i + 1] === '"') { field += '"'; i++; }
+          else inQuotes = false;
+        } else field += ch;
+      } else if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ",") {
+        row.push(field); field = "";
+      } else if (ch === "\n") {
+        row.push(field); field = "";
+        rows.push(row); row = [];
+      } else if (ch === "\r") {
+        /* skip, \n handles the row break */
+      } else {
+        field += ch;
+      }
+    }
+    if (field.length || row.length) { row.push(field); rows.push(row); }
+    return rows;
+  };
+
+  /* Imports a CSV backup exported by nCalendar-style apps
+     (Title,Color,AllDay,StartTime,EndTime,RRule,XDate,Alert,Place,UrlEvent,Note). */
+  const importCSV = (file) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const rows = parseCSVRows(String(reader.result));
+        const headerIdx = rows.findIndex((r) => r[0]?.trim().toLowerCase() === "title");
+        if (headerIdx === -1) { showToast("CSV não reconhecido"); return; }
+
+        const newEvents = [];
+        for (const r of rows.slice(headerIdx + 1)) {
+          const [title, colorCode, allDay, startMs, endMs, , , , place, , note] = r;
+          if (!title || !startMs) continue;
+          const start = new Date(Number(startMs));
+          const end = endMs ? new Date(Number(endMs)) : start;
+          const isAllDay = String(allDay).trim().toLowerCase() === "true";
+          const c = COLORS[Math.abs(Number(colorCode) || 0) % COLORS.length];
+          newEvents.push({
+            id: uid(),
+            title: title.trim(),
+            description: (note || "").trim(),
+            location: (place || "").trim(),
+            date: keyOf(start),
+            startTime: isAllDay ? "" : `${pad2(start.getHours())}:${pad2(start.getMinutes())}`,
+            endTime: isAllDay ? "" : `${pad2(end.getHours())}:${pad2(end.getMinutes())}`,
+            color: c.key,
+            categoryId: null,
+            reminder: -1,
+            repeat: { type: "none", days: [] },
+            seriesId: null,
+          });
+        }
+        if (newEvents.length === 0) { showToast("Nenhum evento encontrado no CSV"); return; }
+        setEvents((prev) => [...prev, ...newEvents]);
+        showToast(`${newEvents.length} evento(s) importado(s)`);
+      } catch (e) { showToast("Não foi possível ler o CSV"); }
     };
     reader.readAsText(file);
   };
@@ -896,6 +969,11 @@ export default function CalendarApp() {
             </button>
             <input ref={fileInputRef} type="file" accept="application/json" className="hidden"
               onChange={(e) => { if (e.target.files[0]) importJSON(e.target.files[0]); e.target.value = ""; setMenuOpen(false); }} />
+            <button onClick={() => csvInputRef.current?.click()} className="flex items-center gap-3 px-2 py-3 text-sm">
+              <Upload size={17} /> Importar eventos (CSV)
+            </button>
+            <input ref={csvInputRef} type="file" accept=".csv,text/csv" className="hidden"
+              onChange={(e) => { if (e.target.files[0]) importCSV(e.target.files[0]); e.target.value = ""; setMenuOpen(false); }} />
             <p className="text-xs text-neutral-500 px-2 pt-3">Seus dados ficam salvos automaticamente neste dispositivo.</p>
           </div>
         </Sheet>
