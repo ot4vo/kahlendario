@@ -371,7 +371,7 @@ function EventRow({ ev, category, onClick }) {
       <div className={`w-1 rounded-full ${c.dot} shrink-0`} />
       <div className="flex-1 bg-neutral-700/50 group-active:bg-neutral-700 rounded-2xl px-4 py-3 mb-2 transition-colors min-w-0">
         <div className="flex items-center gap-2">
-          <p className="text-neutral-100 font-medium truncate">{ev.title}</p>
+          <p className="text-neutral-100 font-medium break-words">{ev.title}</p>
           {ev.repeat?.type && ev.repeat.type !== "none" && <Repeat size={12} className="text-neutral-500 shrink-0" />}
         </div>
         {ev.location && (
@@ -1091,7 +1091,7 @@ function MonthView({ cursorDate, eventsByDate, selectedDate, isLight, onSelectDa
                       return (
                         <span key={ev.id}
                           title={ev.title}
-                          className={`text-[9px] leading-[11px] font-medium px-1 py-[1px] rounded w-full text-left whitespace-normal break-words line-clamp-2 ${
+                          className={`text-[9px] leading-tight font-medium px-1 py-[1px] rounded truncate w-full text-left ${
                             isSelected ? "bg-white/25 text-white" : `${c.soft} ${c.text}`
                           }`}>
                           {ev.title}
