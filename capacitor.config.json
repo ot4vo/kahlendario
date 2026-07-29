@@ -1,0 +1,6 @@
+{
+  "appId": "com.ot4vo.kahlendario",
+  "appName": "Kahlendario",
+  "webDir": "dist",
+  "bundledWebRuntime": false
+}

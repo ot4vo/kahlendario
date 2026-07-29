@@ -418,6 +418,8 @@ export default function CalendarApp() {
   const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [newCatName, setNewCatName] = useState("");
   const [newCatColor, setNewCatColor] = useState("blue");
+  const [bulkColorOpen, setBulkColorOpen] = useState(false);
+  const [bulkGroupKey, setBulkGroupKey] = useState(null);
   const [toast, setToast] = useState("");
   const fileInputRef = useRef(null);
   const csvInputRef = useRef(null);
@@ -450,6 +452,29 @@ export default function CalendarApp() {
   }, [events]);
 
   const categoryById = useMemo(() => Object.fromEntries(categories.map((c) => [c.id, c])), [categories]);
+
+  /* Groups events by normalized title, so recurring/imported events with the
+     same name (e.g. "Trabalho" imported seg-sex) can have their color
+     changed all at once. */
+  const eventGroups = useMemo(() => {
+    const map = {};
+    for (const ev of events) {
+      const key = ev.title.trim().toLowerCase();
+      if (!map[key]) map[key] = { key, title: ev.title.trim(), ids: [], colors: {} };
+      map[key].ids.push(ev.id);
+      map[key].colors[ev.color] = (map[key].colors[ev.color] || 0) + 1;
+    }
+    return Object.values(map)
+      .map((g) => ({ ...g, dominantColor: Object.entries(g.colors).sort((a, b) => b[1] - a[1])[0][0] }))
+      .sort((a, b) => b.ids.length - a.ids.length || a.title.localeCompare(b.title));
+  }, [events]);
+
+  const applyBulkColor = (groupKey, colorKey) => {
+    const group = eventGroups.find((g) => g.key === groupKey);
+    if (!group) return;
+    setEvents((prev) => prev.map((e) => (group.ids.includes(e.id) ? { ...e, color: colorKey } : e)));
+    showToast(`Cor de "${group.title}" atualizada em ${group.ids.length} evento(s)`);
+  };
 
   const filteredEvents = useMemo(() => {
     return events.filter((ev) => {
@@ -958,14 +983,11 @@ export default function CalendarApp() {
             <button onClick={() => { setCategoriesOpen(true); setMenuOpen(false); }} className="flex items-center gap-3 px-2 py-3 text-sm">
               <Palette size={17} /> Categorias
             </button>
-            <button onClick={() => { setStatsOpen(true); setMenuOpen(false); }} className="flex items-center gap-3 px-2 py-3 text-sm">
-              <BarChart3 size={17} /> Estatísticas
+            <button onClick={() => { setBulkGroupKey(null); setBulkColorOpen(true); setMenuOpen(false); }} className="flex items-center gap-3 px-2 py-3 text-sm">
+              <Palette size={17} /> Mudar cor em massa
             </button>
             <button onClick={exportJSON} className="flex items-center gap-3 px-2 py-3 text-sm">
               <Download size={17} /> Exportar backup (JSON)
-            </button>
-            <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-3 px-2 py-3 text-sm">
-              <Upload size={17} /> Importar backup (JSON)
             </button>
             <input ref={fileInputRef} type="file" accept="application/json" className="hidden"
               onChange={(e) => { if (e.target.files[0]) importJSON(e.target.files[0]); e.target.value = ""; setMenuOpen(false); }} />
@@ -1018,6 +1040,48 @@ export default function CalendarApp() {
             </div>
           </div>
         </Sheet>
+
+        {/* Bulk color change */}
+        <Sheet open={bulkColorOpen} onClose={() => { setBulkColorOpen(false); setBulkGroupKey(null); }}
+          title={bulkGroupKey ? eventGroups.find((g) => g.key === bulkGroupKey)?.title : "Mudar cor em massa"}>
+          {!bulkGroupKey ? (
+            <div className="flex flex-col gap-2 pt-1">
+              {eventGroups.length === 0 && (
+                <p className="text-sm text-neutral-500">Nenhum evento ainda.</p>
+              )}
+              <p className="text-xs text-neutral-500 pb-1">
+                Escolha um grupo (eventos com o mesmo título) pra trocar a cor de todos de uma vez.
+              </p>
+              {eventGroups.map((g) => {
+                const cc = colorOf(g.dominantColor);
+                return (
+                  <button key={g.key} onClick={() => setBulkGroupKey(g.key)}
+                    className="w-full flex items-center gap-3 bg-neutral-700/50 hover:bg-neutral-700 rounded-2xl px-4 py-3 transition-colors text-left">
+                    <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${cc.dot}`} />
+                    <span className="flex-1 text-sm text-neutral-100 truncate">{g.title}</span>
+                    <span className="text-xs text-neutral-500 shrink-0">{g.ids.length} evento{g.ids.length > 1 ? "s" : ""}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-5 pt-1">
+              <button onClick={() => setBulkGroupKey(null)} className="flex items-center gap-2 text-sm text-neutral-400 self-start">
+                <ArrowLeft size={16} /> Voltar
+              </button>
+              <p className="text-sm text-neutral-500">
+                Escolha a nova cor pra todos os {eventGroups.find((g) => g.key === bulkGroupKey)?.ids.length} eventos deste grupo.
+              </p>
+              <div className="flex flex-wrap gap-2.5">
+                {COLORS.map((c) => (
+                  <button key={c.key} onClick={() => { applyBulkColor(bulkGroupKey, c.key); setBulkGroupKey(null); }}
+                    aria-label={c.label}
+                    className={`w-9 h-9 rounded-full ${c.dot} transition-transform active:scale-90`} />
+                ))}
+              </div>
+            </div>
+          )}
+        </Sheet>
       </div>
     </div>
   );
@@ -1031,7 +1095,7 @@ function MonthView({ cursorDate, eventsByDate, selectedDate, isLight, onSelectDa
   const weeks = monthMatrix(cursorDate.getFullYear(), cursorDate.getMonth());
   const month = cursorDate.getMonth();
   const tKey = todayKey();
-  const VISIBLE = 2;
+  const VISIBLE = 3;
 
   return (
     <div className="px-2 pt-3">
@@ -1051,8 +1115,12 @@ function MonthView({ cursorDate, eventsByDate, selectedDate, isLight, onSelectDa
               const isSelected = k === selectedDate;
               return (
                 <button key={k} onClick={() => onSelectDay(k)}
-                  className={`relative min-h-[74px] rounded-xl flex flex-col items-stretch p-1 pt-1 transition-colors overflow-hidden ${
-                    isSelected ? "bg-violet-600" : isLight ? "hover:bg-neutral-100" : "hover:bg-neutral-800"
+                  className={`relative min-h-[74px] rounded-xl flex flex-col items-stretch p-1 pt-1 transition-colors overflow-hidden border ${
+                    isSelected
+                      ? "bg-violet-600 border-violet-600"
+                      : isLight
+                        ? "border-neutral-200 hover:bg-neutral-100"
+                        : "border-neutral-800/80 hover:bg-neutral-800 hover:border-neutral-700"
                   }`}>
                   <span className={`text-[12px] leading-none w-5 h-5 flex items-center justify-center rounded-full shrink-0 self-start ${
                     isSelected ? "text-white font-semibold" :
