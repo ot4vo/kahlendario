@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
   ChevronLeft, ChevronRight, Plus, Search, SlidersHorizontal, X, Clock,
-  MapPin, Bell, Repeat, Copy, Trash2, Pencil, Check, Sun, Moon, BarChart3,
-  Download, Upload, Menu, ChevronDown, CalendarDays, ArrowLeft
+  MapPin, Bell, Repeat, Copy, Trash2, Pencil, Check, BarChart3,
+  Download, Upload, Menu, ChevronDown, CalendarDays, ArrowLeft, Palette
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -10,15 +10,23 @@ import {
 /* ------------------------------------------------------------------ */
 
 const COLORS = [
-  { key: "red",    label: "Vermelho", hex: "#f43f5e", dot: "bg-rose-500",    ring: "ring-rose-500",    soft: "bg-rose-500/15",    text: "text-rose-400" },
-  { key: "blue",   label: "Azul",     hex: "#3b82f6", dot: "bg-blue-500",    ring: "ring-blue-500",    soft: "bg-blue-500/15",    text: "text-blue-400" },
-  { key: "green",  label: "Verde",    hex: "#22c55e", dot: "bg-emerald-500", ring: "ring-emerald-500", soft: "bg-emerald-500/15", text: "text-emerald-400" },
-  { key: "yellow", label: "Amarelo",  hex: "#eab308", dot: "bg-yellow-500",  ring: "ring-yellow-500",  soft: "bg-yellow-500/15",  text: "text-yellow-400" },
-  { key: "orange", label: "Laranja",  hex: "#f97316", dot: "bg-orange-500",  ring: "ring-orange-500",  soft: "bg-orange-500/15",  text: "text-orange-400" },
-  { key: "purple", label: "Roxo",     hex: "#a855f7", dot: "bg-purple-500",  ring: "ring-purple-500",  soft: "bg-purple-500/15",  text: "text-purple-400" },
-  { key: "pink",   label: "Rosa",     hex: "#ec4899", dot: "bg-pink-500",    ring: "ring-pink-500",    soft: "bg-pink-500/15",    text: "text-pink-400" },
-  { key: "cyan",   label: "Ciano",    hex: "#06b6d4", dot: "bg-cyan-500",    ring: "ring-cyan-500",    soft: "bg-cyan-500/15",    text: "text-cyan-400" },
-  { key: "gray",   label: "Cinza",    hex: "#9ca3af", dot: "bg-gray-400",    ring: "ring-gray-400",    soft: "bg-gray-400/15",    text: "text-gray-300" },
+  { key: "red",     label: "Vermelho",  hex: "#f43f5e", dot: "bg-rose-500",    ring: "ring-rose-500",    soft: "bg-rose-500/15",    text: "text-rose-400" },
+  { key: "blue",    label: "Azul",      hex: "#3b82f6", dot: "bg-blue-500",    ring: "ring-blue-500",    soft: "bg-blue-500/15",    text: "text-blue-400" },
+  { key: "green",   label: "Verde",     hex: "#22c55e", dot: "bg-emerald-500", ring: "ring-emerald-500", soft: "bg-emerald-500/15", text: "text-emerald-400" },
+  { key: "yellow",  label: "Amarelo",   hex: "#eab308", dot: "bg-yellow-500",  ring: "ring-yellow-500",  soft: "bg-yellow-500/15",  text: "text-yellow-400" },
+  { key: "orange",  label: "Laranja",   hex: "#f97316", dot: "bg-orange-500",  ring: "ring-orange-500",  soft: "bg-orange-500/15",  text: "text-orange-400" },
+  { key: "purple",  label: "Roxo",      hex: "#a855f7", dot: "bg-purple-500",  ring: "ring-purple-500",  soft: "bg-purple-500/15",  text: "text-purple-400" },
+  { key: "pink",    label: "Rosa",      hex: "#ec4899", dot: "bg-pink-500",    ring: "ring-pink-500",    soft: "bg-pink-500/15",    text: "text-pink-400" },
+  { key: "cyan",    label: "Ciano",     hex: "#06b6d4", dot: "bg-cyan-500",    ring: "ring-cyan-500",    soft: "bg-cyan-500/15",    text: "text-cyan-400" },
+  { key: "gray",    label: "Cinza",     hex: "#9ca3af", dot: "bg-gray-400",    ring: "ring-gray-400",    soft: "bg-gray-400/15",    text: "text-gray-300" },
+  { key: "teal",    label: "Verde-azulado", hex: "#14b8a6", dot: "bg-teal-500",    ring: "ring-teal-500",    soft: "bg-teal-500/15",    text: "text-teal-400" },
+  { key: "indigo",  label: "Índigo",    hex: "#6366f1", dot: "bg-indigo-500",  ring: "ring-indigo-500",  soft: "bg-indigo-500/15",  text: "text-indigo-400" },
+  { key: "lime",    label: "Limão",     hex: "#84cc16", dot: "bg-lime-500",    ring: "ring-lime-500",    soft: "bg-lime-500/15",    text: "text-lime-400" },
+  { key: "fuchsia", label: "Fúcsia",    hex: "#d946ef", dot: "bg-fuchsia-500", ring: "ring-fuchsia-500", soft: "bg-fuchsia-500/15", text: "text-fuchsia-400" },
+  { key: "amber",   label: "Âmbar",     hex: "#f59e0b", dot: "bg-amber-500",   ring: "ring-amber-500",   soft: "bg-amber-500/15",   text: "text-amber-400" },
+  { key: "sky",     label: "Céu",       hex: "#0ea5e9", dot: "bg-sky-500",     ring: "ring-sky-500",     soft: "bg-sky-500/15",     text: "text-sky-400" },
+  { key: "white",   label: "Branco",    hex: "#f5f5f5", dot: "bg-[#f5f5f5]",   ring: "ring-[#f5f5f5]",   soft: "bg-[#f5f5f5]/15",   text: "text-[#f5f5f5]" },
+  { key: "beige",   label: "Bege",      hex: "#d9c7a3", dot: "bg-[#d9c7a3]",   ring: "ring-[#d9c7a3]",   soft: "bg-[#d9c7a3]/15",   text: "text-[#d9c7a3]" },
 ];
 const colorOf = (key) => COLORS.find((c) => c.key === key) || COLORS[8];
 
@@ -386,7 +394,6 @@ export default function CalendarApp() {
   const [loaded, setLoaded] = useState(false);
   const [events, setEvents] = useState([]);
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
-  const [theme, setTheme] = useState("dark");
 
   const [view, setView] = useState("month"); // month | week | day
   const [cursorDate, setCursorDate] = useState(new Date());
@@ -408,6 +415,9 @@ export default function CalendarApp() {
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
+  const [categoriesOpen, setCategoriesOpen] = useState(false);
+  const [newCatName, setNewCatName] = useState("");
+  const [newCatColor, setNewCatColor] = useState("blue");
   const [toast, setToast] = useState("");
   const fileInputRef = useRef(null);
 
@@ -416,22 +426,19 @@ export default function CalendarApp() {
   /* ---- load / save ---- */
   useEffect(() => {
     (async () => {
-      const [ev, cats, settings] = await Promise.all([
+      const [ev, cats] = await Promise.all([
         loadStorage("calendar:events", []),
         loadStorage("calendar:categories", DEFAULT_CATEGORIES),
-        loadStorage("calendar:settings", { theme: "dark" }),
       ]);
       setEvents(ev);
       setCategories(cats);
-      setTheme(settings.theme || "dark");
       setLoaded(true);
     })();
   }, []);
   useEffect(() => { if (loaded) saveStorage("calendar:events", events); }, [events, loaded]);
   useEffect(() => { if (loaded) saveStorage("calendar:categories", categories); }, [categories, loaded]);
-  useEffect(() => { if (loaded) saveStorage("calendar:settings", { theme }); }, [theme, loaded]);
 
-  const isLight = theme === "light";
+  const isLight = false; // Kahlendario é sempre no tema escuro
 
   /* ---- derived ---- */
   const eventsByDate = useMemo(() => {
@@ -539,6 +546,22 @@ export default function CalendarApp() {
     reader.readAsText(file);
   };
 
+  const addCategory = () => {
+    const name = newCatName.trim();
+    if (!name) return;
+    setCategories((prev) => [...prev, { id: uid(), name, color: newCatColor }]);
+    setNewCatName("");
+    setNewCatColor("blue");
+    showToast("Categoria adicionada");
+  };
+
+  const removeCategory = (id) => {
+    setCategories((prev) => prev.filter((c) => c.id !== id));
+    setEvents((prev) => prev.map((e) => (e.categoryId === id ? { ...e, categoryId: null } : e)));
+    setActiveCats((prev) => prev.filter((c) => c !== id));
+    showToast("Categoria removida");
+  };
+
   /* ---- navigation ---- */
   const goToday = () => { const t = new Date(); setCursorDate(t); setSelectedDate(todayKey()); };
   const stepMonth = (n) => setCursorDate((d) => addMonths(d, n));
@@ -614,7 +637,7 @@ export default function CalendarApp() {
         <div className={`sticky top-0 z-30 backdrop-blur-md ${isLight ? "bg-white/90 border-neutral-200" : "bg-neutral-900/90 border-neutral-800"} border-b px-4 pt-4 pb-3`}>
           <div className="flex items-center justify-between mb-3">
             <div>
-              <p className={`text-xs ${isLight ? "text-neutral-500" : "text-neutral-500"}`}>Sua agenda</p>
+              <p className={`text-xs font-medium tracking-wide ${isLight ? "text-neutral-500" : "text-violet-400"}`}>Kahlendario</p>
               <h1 className="text-2xl font-semibold -mt-0.5" style={{ fontFamily: "'Fraunces', serif" }}>{headerLabel}</h1>
             </div>
             <div className="flex items-center gap-1">
@@ -859,8 +882,8 @@ export default function CalendarApp() {
         {/* Menu */}
         <Sheet open={menuOpen} onClose={() => setMenuOpen(false)} title="Menu">
           <div className="flex flex-col gap-1 pt-1">
-            <button onClick={() => setTheme(isLight ? "dark" : "light")} className="flex items-center gap-3 px-2 py-3 text-sm">
-              {isLight ? <Moon size={17} /> : <Sun size={17} />} {isLight ? "Tema escuro" : "Tema claro"}
+            <button onClick={() => { setCategoriesOpen(true); setMenuOpen(false); }} className="flex items-center gap-3 px-2 py-3 text-sm">
+              <Palette size={17} /> Categorias
             </button>
             <button onClick={() => { setStatsOpen(true); setMenuOpen(false); }} className="flex items-center gap-3 px-2 py-3 text-sm">
               <BarChart3 size={17} /> Estatísticas
@@ -874,6 +897,47 @@ export default function CalendarApp() {
             <input ref={fileInputRef} type="file" accept="application/json" className="hidden"
               onChange={(e) => { if (e.target.files[0]) importJSON(e.target.files[0]); e.target.value = ""; setMenuOpen(false); }} />
             <p className="text-xs text-neutral-500 px-2 pt-3">Seus dados ficam salvos automaticamente neste dispositivo.</p>
+          </div>
+        </Sheet>
+
+        {/* Categories management */}
+        <Sheet open={categoriesOpen} onClose={() => setCategoriesOpen(false)} title="Categorias">
+          <div className="flex flex-col gap-5 pt-1">
+            <div className="flex flex-col gap-2">
+              {categories.length === 0 && (
+                <p className="text-sm text-neutral-500">Nenhuma categoria ainda.</p>
+              )}
+              {categories.map((cat) => {
+                const cc = colorOf(cat.color);
+                return (
+                  <div key={cat.id} className="flex items-center gap-3 bg-neutral-700/50 rounded-2xl px-4 py-3">
+                    <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${cc.dot}`} />
+                    <span className="flex-1 text-sm text-neutral-100 truncate">{cat.name}</span>
+                    <button onClick={() => removeCategory(cat.id)} aria-label={`Remover ${cat.name}`}
+                      className="w-8 h-8 flex items-center justify-center rounded-full text-neutral-500 hover:text-rose-400 hover:bg-neutral-700 transition-colors">
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex flex-col gap-3 border-t border-neutral-700 pt-4">
+              <div className="text-sm text-neutral-500">Nova categoria</div>
+              <input value={newCatName} onChange={(e) => setNewCatName(e.target.value)}
+                placeholder="Nome da categoria"
+                className="w-full bg-neutral-700/60 rounded-2xl px-4 py-3 text-neutral-100 placeholder-neutral-500 outline-none" />
+              <div className="flex flex-wrap gap-2.5">
+                {COLORS.map((c) => (
+                  <button key={c.key} onClick={() => setNewCatColor(c.key)} aria-label={c.label}
+                    className={`w-8 h-8 rounded-full ${c.dot} transition-transform active:scale-90 ${newCatColor === c.key ? `ring-2 ring-offset-2 ring-offset-neutral-800 ${c.ring} scale-110` : ""}`} />
+                ))}
+              </div>
+              <button onClick={addCategory} disabled={!newCatName.trim()}
+                className="py-3.5 rounded-2xl bg-violet-600 text-white font-medium active:scale-95 transition-transform disabled:opacity-40 disabled:active:scale-100">
+                Adicionar categoria
+              </button>
+            </div>
           </div>
         </Sheet>
       </div>
