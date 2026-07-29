@@ -1,0 +1,1073 @@
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import {
+  ChevronLeft, ChevronRight, Plus, Search, SlidersHorizontal, X, Clock,
+  MapPin, Bell, Repeat, Copy, Trash2, Pencil, Check, Sun, Moon, BarChart3,
+  Download, Upload, Menu, ChevronDown, CalendarDays, ArrowLeft
+} from "lucide-react";
+
+/* ------------------------------------------------------------------ */
+/* Constants                                                          */
+/* ------------------------------------------------------------------ */
+
+const COLORS = [
+  { key: "red",    label: "Vermelho", hex: "#f43f5e", dot: "bg-rose-500",    ring: "ring-rose-500",    soft: "bg-rose-500/15",    text: "text-rose-400" },
+  { key: "blue",   label: "Azul",     hex: "#3b82f6", dot: "bg-blue-500",    ring: "ring-blue-500",    soft: "bg-blue-500/15",    text: "text-blue-400" },
+  { key: "green",  label: "Verde",    hex: "#22c55e", dot: "bg-emerald-500", ring: "ring-emerald-500", soft: "bg-emerald-500/15", text: "text-emerald-400" },
+  { key: "yellow", label: "Amarelo",  hex: "#eab308", dot: "bg-yellow-500",  ring: "ring-yellow-500",  soft: "bg-yellow-500/15",  text: "text-yellow-400" },
+  { key: "orange", label: "Laranja",  hex: "#f97316", dot: "bg-orange-500",  ring: "ring-orange-500",  soft: "bg-orange-500/15",  text: "text-orange-400" },
+  { key: "purple", label: "Roxo",     hex: "#a855f7", dot: "bg-purple-500",  ring: "ring-purple-500",  soft: "bg-purple-500/15",  text: "text-purple-400" },
+  { key: "pink",   label: "Rosa",     hex: "#ec4899", dot: "bg-pink-500",    ring: "ring-pink-500",    soft: "bg-pink-500/15",    text: "text-pink-400" },
+  { key: "cyan",   label: "Ciano",    hex: "#06b6d4", dot: "bg-cyan-500",    ring: "ring-cyan-500",    soft: "bg-cyan-500/15",    text: "text-cyan-400" },
+  { key: "gray",   label: "Cinza",    hex: "#9ca3af", dot: "bg-gray-400",    ring: "ring-gray-400",    soft: "bg-gray-400/15",    text: "text-gray-300" },
+];
+const colorOf = (key) => COLORS.find((c) => c.key === key) || COLORS[8];
+
+const DEFAULT_CATEGORIES = [
+  { id: "trabalho",   name: "Trabalho",   color: "blue" },
+  { id: "faculdade",  name: "Faculdade",  color: "purple" },
+  { id: "academia",   name: "Academia",   color: "orange" },
+  { id: "consulta",   name: "Consulta",   color: "cyan" },
+  { id: "financeiro", name: "Financeiro", color: "green" },
+  { id: "pessoal",    name: "Pessoal",    color: "pink" },
+  { id: "lazer",      name: "Lazer",      color: "yellow" },
+];
+
+const REMINDERS = [
+  { value: -1,  label: "Sem lembrete" },
+  { value: 5,   label: "5 minutos antes" },
+  { value: 10,  label: "10 minutos antes" },
+  { value: 30,  label: "30 minutos antes" },
+  { value: 60,  label: "1 hora antes" },
+  { value: 120, label: "2 horas antes" },
+  { value: 1440,label: "1 dia antes" },
+];
+
+const WEEKDAY_LABELS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+const WEEKDAY_FULL = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
+const MONTH_LABELS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+
+const REPEAT_PRESETS = [
+  { key: "none",     label: "Não repetir" },
+  { key: "daily",    label: "Todos os dias" },
+  { key: "weekdays", label: "Dias úteis (seg–sex)" },
+  { key: "weekend",  label: "Finais de semana" },
+  { key: "weekly",   label: "Semanal" },
+  { key: "biweekly", label: "Quinzenal" },
+  { key: "monthly",  label: "Mensal" },
+  { key: "yearly",   label: "Anual" },
+  { key: "custom",   label: "Dias personalizados" },
+];
+
+/* ------------------------------------------------------------------ */
+/* Date helpers (local time, no timezone surprises)                   */
+/* ------------------------------------------------------------------ */
+
+const pad2 = (n) => String(n).padStart(2, "0");
+const keyOf = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const parseKey = (k) => { const [y, m, d] = k.split("-").map(Number); return new Date(y, m - 1, d); };
+const todayKey = () => keyOf(new Date());
+const addDays = (d, n) => { const r = new Date(d); r.setDate(r.getDate() + n); return r; };
+const addMonths = (d, n) => { const r = new Date(d); r.setMonth(r.getMonth() + n); return r; };
+const addYears = (d, n) => { const r = new Date(d); r.setFullYear(r.getFullYear() + n); return r; };
+const sameDay = (a, b) => keyOf(a) === keyOf(b);
+const startOfWeek = (d) => addDays(d, -d.getDay());
+
+function monthMatrix(year, month) {
+  const first = new Date(year, month, 1);
+  const gridStart = startOfWeek(first);
+  const weeks = [];
+  let cursor = gridStart;
+  for (let w = 0; w < 6; w++) {
+    const week = [];
+    for (let i = 0; i < 7; i++) { week.push(cursor); cursor = addDays(cursor, 1); }
+    weeks.push(week);
+  }
+  return weeks;
+}
+
+function timeToMinutes(t) { if (!t) return 0; const [h, m] = t.split(":").map(Number); return h * 60 + m; }
+function minutesLabel(mins) {
+  const h = Math.floor(mins / 60) % 24, m = mins % 60;
+  return `${pad2(h)}:${pad2(m)}`;
+}
+function formatHM(t) { return t || "--:--"; }
+
+/* ------------------------------------------------------------------ */
+/* Repeat occurrence generation                                       */
+/* ------------------------------------------------------------------ */
+
+function generateDates(baseDateKey, repeat) {
+  const base = parseKey(baseDateKey);
+  const out = [];
+  const type = repeat?.type || "none";
+
+  if (type === "none") { out.push(baseDateKey); return out; }
+
+  if (type === "daily") {
+    for (let i = 0; i < 90; i++) out.push(keyOf(addDays(base, i)));
+  } else if (type === "weekdays") {
+    let d = base, n = 0;
+    while (n < 90) { const wd = d.getDay(); if (wd >= 1 && wd <= 5) { out.push(keyOf(d)); n++; } d = addDays(d, 1); }
+  } else if (type === "weekend") {
+    let d = base, n = 0;
+    while (n < 60) { const wd = d.getDay(); if (wd === 0 || wd === 6) { out.push(keyOf(d)); n++; } d = addDays(d, 1); }
+  } else if (type === "weekly") {
+    for (let i = 0; i < 26; i++) out.push(keyOf(addDays(base, i * 7)));
+  } else if (type === "biweekly") {
+    for (let i = 0; i < 26; i++) out.push(keyOf(addDays(base, i * 14)));
+  } else if (type === "monthly") {
+    for (let i = 0; i < 24; i++) out.push(keyOf(addMonths(base, i)));
+  } else if (type === "yearly") {
+    for (let i = 0; i < 5; i++) out.push(keyOf(addYears(base, i)));
+  } else if (type === "custom") {
+    const days = repeat.days || [];
+    if (days.length === 0) { out.push(baseDateKey); return out; }
+    let d = base, count = 0, guard = 0;
+    while (count < 60 && guard < 400) {
+      if (days.includes(d.getDay())) { out.push(keyOf(d)); count++; }
+      d = addDays(d, 1); guard++;
+    }
+  }
+  return out;
+}
+
+const uid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
+
+/* ------------------------------------------------------------------ */
+/* Persistence (browser localStorage)                                 */
+/* ------------------------------------------------------------------ */
+
+async function loadStorage(key, fallback) {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (raw) return JSON.parse(raw);
+  } catch (e) { /* key missing or storage unavailable */ }
+  return fallback;
+}
+async function saveStorage(key, value) {
+  try { window.localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* ignore */ }
+}
+
+/* ------------------------------------------------------------------ */
+/* Small UI atoms                                                     */
+/* ------------------------------------------------------------------ */
+
+function IconBtn({ onClick, children, label, active }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors active:scale-95 ${
+        active ? "bg-violet-500/20 text-violet-300" : "text-neutral-400 hover:text-neutral-100 hover:bg-neutral-700"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Sheet({ open, onClose, children, title, maxHeight = "85vh" }) {
+  if (!open) return null;
+  return (
+    <div className="absolute inset-0 z-50 flex items-end justify-center">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div
+        className="relative w-full bg-neutral-800 border-t border-neutral-700 rounded-t-3xl overflow-hidden flex flex-col animate-[slideUp_0.25s_ease-out]"
+        style={{ maxHeight }}
+      >
+        <div className="pt-3 pb-1 flex justify-center shrink-0">
+          <div className="w-10 h-1.5 rounded-full bg-neutral-600" />
+        </div>
+        {title && (
+          <div className="px-5 pb-3 flex items-center justify-between shrink-0">
+            <h2 className="text-lg font-semibold text-neutral-100">{title}</h2>
+            <IconBtn onClick={onClose} label="Fechar"><X size={18} /></IconBtn>
+          </div>
+        )}
+        <div className="overflow-y-auto px-5 pb-8">{children}</div>
+      </div>
+      <style>{`@keyframes slideUp{from{transform:translateY(24px);opacity:.6}to{transform:translateY(0);opacity:1}}`}</style>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Event Form (create / edit)                                         */
+/* ------------------------------------------------------------------ */
+
+function EventForm({ initial, categories, onCancel, onSave }) {
+  const [title, setTitle] = useState(initial.title || "");
+  const [description, setDescription] = useState(initial.description || "");
+  const [location, setLocation] = useState(initial.location || "");
+  const [date, setDate] = useState(initial.date || todayKey());
+  const [startTime, setStartTime] = useState(initial.startTime || "09:00");
+  const [endTime, setEndTime] = useState(initial.endTime || "10:00");
+  const [color, setColor] = useState(initial.color || "blue");
+  const [categoryId, setCategoryId] = useState(initial.categoryId || "");
+  const [reminder, setReminder] = useState(initial.reminder ?? -1);
+  const [repeatType, setRepeatType] = useState(initial.repeat?.type || "none");
+  const [customDays, setCustomDays] = useState(initial.repeat?.days || []);
+  const [repeatOpen, setRepeatOpen] = useState(false);
+
+  const toggleDay = (i) => setCustomDays((d) => (d.includes(i) ? d.filter((x) => x !== i) : [...d, i].sort()));
+
+  const canSave = title.trim().length > 0 && date;
+
+  const handleSave = () => {
+    if (!canSave) return;
+    onSave({
+      title: title.trim(),
+      description: description.trim(),
+      location: location.trim(),
+      date,
+      startTime,
+      endTime,
+      color,
+      categoryId: categoryId || null,
+      reminder,
+      repeat: { type: repeatType, days: repeatType === "custom" ? customDays : [] },
+    });
+  };
+
+  return (
+    <div className="flex flex-col gap-5 pt-1">
+      <input
+        autoFocus
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        placeholder="Título do evento"
+        className="w-full bg-transparent text-2xl font-semibold text-neutral-100 placeholder-neutral-500 outline-none border-b border-neutral-700 pb-3 focus:border-violet-500 transition-colors"
+        style={{ fontFamily: "'Fraunces', serif" }}
+      />
+
+      <div className="grid grid-cols-3 gap-2">
+        <label className="col-span-3 flex items-center gap-3 bg-neutral-700/60 rounded-2xl px-4 py-3">
+          <CalendarDays size={18} className="text-neutral-500 shrink-0" />
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+            className="bg-transparent text-neutral-100 outline-none w-full [color-scheme:dark]" />
+        </label>
+        <label className="col-span-3 sm:col-span-1 flex items-center gap-2 bg-neutral-700/60 rounded-2xl px-4 py-3">
+          <Clock size={18} className="text-neutral-500 shrink-0" />
+          <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)}
+            className="bg-transparent text-neutral-100 outline-none w-full [color-scheme:dark]" />
+        </label>
+        <div className="col-span-3 sm:col-span-1 flex items-center justify-center text-neutral-500 text-sm">até</div>
+        <label className="col-span-3 sm:col-span-1 flex items-center gap-2 bg-neutral-700/60 rounded-2xl px-4 py-3">
+          <Clock size={18} className="text-neutral-500 shrink-0" />
+          <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)}
+            className="bg-transparent text-neutral-100 outline-none w-full [color-scheme:dark]" />
+        </label>
+      </div>
+
+      <label className="flex items-center gap-3 bg-neutral-700/60 rounded-2xl px-4 py-3">
+        <MapPin size={18} className="text-neutral-500 shrink-0" />
+        <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Local (opcional)"
+          className="bg-transparent text-neutral-100 placeholder-neutral-500 outline-none w-full" />
+      </label>
+
+      <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Descrição (opcional)" rows={2}
+        className="bg-neutral-700/60 rounded-2xl px-4 py-3 text-neutral-100 placeholder-neutral-500 outline-none resize-none" />
+
+      <div>
+        <div className="text-sm text-neutral-500 mb-2">Cor</div>
+        <div className="flex flex-wrap gap-2.5">
+          {COLORS.map((c) => (
+            <button key={c.key} onClick={() => setColor(c.key)} aria-label={c.label}
+              className={`w-8 h-8 rounded-full ${c.dot} transition-transform active:scale-90 ${color === c.key ? `ring-2 ring-offset-2 ring-offset-neutral-800 ${c.ring} scale-110` : ""}`} />
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div className="text-sm text-neutral-500 mb-2">Categoria</div>
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => setCategoryId("")}
+            className={`px-3 py-1.5 rounded-full text-sm border ${categoryId === "" ? "border-violet-500 text-violet-300 bg-violet-500/10" : "border-neutral-600 text-neutral-400"}`}>
+            Nenhuma
+          </button>
+          {categories.map((cat) => {
+            const cc = colorOf(cat.color);
+            return (
+              <button key={cat.id} onClick={() => setCategoryId(cat.id)}
+                className={`px-3 py-1.5 rounded-full text-sm border flex items-center gap-1.5 ${categoryId === cat.id ? `border-transparent ${cc.soft} ${cc.text}` : "border-neutral-600 text-neutral-400"}`}>
+                <span className={`w-2 h-2 rounded-full ${cc.dot}`} />
+                {cat.name}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <label className="flex items-center gap-3 bg-neutral-700/60 rounded-2xl px-4 py-3">
+        <Bell size={18} className="text-neutral-500 shrink-0" />
+        <select value={reminder} onChange={(e) => setReminder(Number(e.target.value))}
+          className="bg-transparent text-neutral-100 outline-none w-full">
+          {REMINDERS.map((r) => <option key={r.value} value={r.value} className="bg-neutral-800">{r.label}</option>)}
+        </select>
+      </label>
+
+      <div className="bg-neutral-700/60 rounded-2xl overflow-hidden">
+        <button onClick={() => setRepeatOpen((o) => !o)} className="w-full flex items-center gap-3 px-4 py-3">
+          <Repeat size={18} className="text-neutral-500 shrink-0" />
+          <span className="text-neutral-100 flex-1 text-left">{REPEAT_PRESETS.find((p) => p.key === repeatType)?.label}</span>
+          <ChevronDown size={16} className={`text-neutral-500 transition-transform ${repeatOpen ? "rotate-180" : ""}`} />
+        </button>
+        {repeatOpen && (
+          <div className="px-4 pb-4 flex flex-col gap-1 border-t border-neutral-600/50 pt-3">
+            {REPEAT_PRESETS.map((p) => (
+              <button key={p.key} onClick={() => setRepeatType(p.key)}
+                className={`flex items-center justify-between px-3 py-2 rounded-xl text-sm text-left ${repeatType === p.key ? "bg-violet-500/15 text-violet-300" : "text-neutral-300"}`}>
+                {p.label}
+                {repeatType === p.key && <Check size={16} />}
+              </button>
+            ))}
+            {repeatType === "custom" && (
+              <div className="flex justify-between gap-1 pt-2">
+                {WEEKDAY_LABELS.map((lab, i) => (
+                  <button key={i} onClick={() => toggleDay(i)}
+                    className={`w-9 h-9 rounded-full text-xs font-medium flex items-center justify-center transition-colors ${customDays.includes(i) ? "bg-violet-500 text-white" : "bg-neutral-600/60 text-neutral-400"}`}>
+                    {lab[0]}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="flex gap-3 pt-2 sticky bottom-0">
+        <button onClick={onCancel} className="flex-1 py-3.5 rounded-2xl bg-neutral-700 text-neutral-300 font-medium active:scale-95 transition-transform">
+          Cancelar
+        </button>
+        <button onClick={handleSave} disabled={!canSave}
+          className="flex-1 py-3.5 rounded-2xl bg-violet-600 text-white font-medium active:scale-95 transition-transform disabled:opacity-40 disabled:active:scale-100">
+          Salvar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Event chip / row                                                   */
+/* ------------------------------------------------------------------ */
+
+function EventRow({ ev, category, onClick }) {
+  const c = colorOf(ev.color);
+  return (
+    <button onClick={onClick} className="w-full flex items-stretch gap-3 text-left group">
+      <div className="flex flex-col items-center pt-0.5 w-12 shrink-0">
+        <span className="text-xs font-medium text-neutral-300">{formatHM(ev.startTime)}</span>
+        <span className="text-[10px] text-neutral-500">{formatHM(ev.endTime)}</span>
+      </div>
+      <div className={`w-1 rounded-full ${c.dot} shrink-0`} />
+      <div className="flex-1 bg-neutral-700/50 group-active:bg-neutral-700 rounded-2xl px-4 py-3 mb-2 transition-colors min-w-0">
+        <div className="flex items-center gap-2">
+          <p className="text-neutral-100 font-medium truncate">{ev.title}</p>
+          {ev.repeat?.type && ev.repeat.type !== "none" && <Repeat size={12} className="text-neutral-500 shrink-0" />}
+        </div>
+        {ev.location && (
+          <p className="text-xs text-neutral-500 flex items-center gap-1 mt-0.5 truncate"><MapPin size={11} />{ev.location}</p>
+        )}
+        {ev.description && <p className="text-xs text-neutral-500 mt-1 line-clamp-2">{ev.description}</p>}
+        {category && (
+          <span className={`inline-block mt-2 text-[10px] px-2 py-0.5 rounded-full ${c.soft} ${c.text}`}>{category.name}</span>
+        )}
+      </div>
+    </button>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Main App                                                            */
+/* ------------------------------------------------------------------ */
+
+export default function CalendarApp() {
+  const [loaded, setLoaded] = useState(false);
+  const [events, setEvents] = useState([]);
+  const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
+  const [theme, setTheme] = useState("dark");
+
+  const [view, setView] = useState("month"); // month | week | day
+  const [cursorDate, setCursorDate] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState(todayKey());
+
+  const [daySheetOpen, setDaySheetOpen] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [formInitial, setFormInitial] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+
+  const [detailEvent, setDetailEvent] = useState(null);
+  const [seriesPrompt, setSeriesPrompt] = useState(null); // {action:'edit'|'delete', event}
+
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [activeColors, setActiveColors] = useState([]);
+  const [activeCats, setActiveCats] = useState([]);
+
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [toast, setToast] = useState("");
+  const fileInputRef = useRef(null);
+
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2200); };
+
+  /* ---- load / save ---- */
+  useEffect(() => {
+    (async () => {
+      const [ev, cats, settings] = await Promise.all([
+        loadStorage("calendar:events", []),
+        loadStorage("calendar:categories", DEFAULT_CATEGORIES),
+        loadStorage("calendar:settings", { theme: "dark" }),
+      ]);
+      setEvents(ev);
+      setCategories(cats);
+      setTheme(settings.theme || "dark");
+      setLoaded(true);
+    })();
+  }, []);
+  useEffect(() => { if (loaded) saveStorage("calendar:events", events); }, [events, loaded]);
+  useEffect(() => { if (loaded) saveStorage("calendar:categories", categories); }, [categories, loaded]);
+  useEffect(() => { if (loaded) saveStorage("calendar:settings", { theme }); }, [theme, loaded]);
+
+  const isLight = theme === "light";
+
+  /* ---- derived ---- */
+  const eventsByDate = useMemo(() => {
+    const map = {};
+    for (const ev of events) { (map[ev.date] = map[ev.date] || []).push(ev); }
+    for (const k in map) map[k].sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+    return map;
+  }, [events]);
+
+  const categoryById = useMemo(() => Object.fromEntries(categories.map((c) => [c.id, c])), [categories]);
+
+  const filteredEvents = useMemo(() => {
+    return events.filter((ev) => {
+      if (activeColors.length && !activeColors.includes(ev.color)) return false;
+      if (activeCats.length && !activeCats.includes(ev.categoryId)) return false;
+      if (query.trim()) {
+        const q = query.toLowerCase();
+        if (!ev.title.toLowerCase().includes(q) && !(ev.description || "").toLowerCase().includes(q)) return false;
+      }
+      return true;
+    });
+  }, [events, activeColors, activeCats, query]);
+
+  const filteredByDate = useMemo(() => {
+    const map = {};
+    for (const ev of filteredEvents) { (map[ev.date] = map[ev.date] || []).push(ev); }
+    for (const k in map) map[k].sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+    return map;
+  }, [filteredEvents]);
+
+  const hasFilters = activeColors.length > 0 || activeCats.length > 0;
+
+  /* ---- actions ---- */
+  const openCreateForm = (dateKey) => {
+    setEditingId(null);
+    setFormInitial({ date: dateKey || selectedDate });
+    setFormOpen(true);
+    setDaySheetOpen(false);
+    setDetailEvent(null);
+  };
+
+  const openEditForm = (ev) => {
+    setEditingId(ev.id);
+    setFormInitial(ev);
+    setFormOpen(true);
+    setDetailEvent(null);
+  };
+
+  const handleSaveForm = (data) => {
+    if (editingId) {
+      setEvents((prev) => prev.map((e) => (e.id === editingId ? { ...e, ...data } : e)));
+      showToast("Evento atualizado");
+    } else {
+      const seriesId = uid();
+      const dates = generateDates(data.date, data.repeat);
+      const newOnes = dates.map((d) => ({ ...data, id: uid(), seriesId: dates.length > 1 ? seriesId : null, date: d }));
+      setEvents((prev) => [...prev, ...newOnes]);
+      showToast(dates.length > 1 ? `${dates.length} ocorrências criadas` : "Evento criado");
+    }
+    setFormOpen(false);
+    setEditingId(null);
+  };
+
+  const deleteEvent = (ev, wholeSeries) => {
+    setEvents((prev) => prev.filter((e) => (wholeSeries && ev.seriesId ? e.seriesId !== ev.seriesId : e.id !== ev.id)));
+    setDetailEvent(null);
+    setSeriesPrompt(null);
+    showToast(wholeSeries ? "Série excluída" : "Evento excluído");
+  };
+
+  const duplicateEvent = (ev) => {
+    setEvents((prev) => [...prev, { ...ev, id: uid(), seriesId: null, title: ev.title + " (cópia)" }]);
+    setDetailEvent(null);
+    showToast("Evento duplicado");
+  };
+
+  const changeColor = (ev, colorKey) => {
+    setEvents((prev) => prev.map((e) => (e.id === ev.id ? { ...e, color: colorKey } : e)));
+    setDetailEvent((d) => (d && d.id === ev.id ? { ...d, color: colorKey } : d));
+  };
+
+  const requestDelete = (ev) => { if (ev.seriesId) setSeriesPrompt({ action: "delete", event: ev }); else deleteEvent(ev, false); };
+  const requestEdit = (ev) => { if (ev.seriesId) setSeriesPrompt({ action: "edit", event: ev }); else openEditForm(ev); };
+
+  const exportJSON = () => {
+    const blob = new Blob([JSON.stringify({ events, categories }, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `calendario-backup-${todayKey()}.json`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast("Backup exportado");
+  };
+
+  const importJSON = (file) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result);
+        if (Array.isArray(parsed.events)) setEvents(parsed.events);
+        if (Array.isArray(parsed.categories)) setCategories(parsed.categories);
+        showToast("Backup importado");
+      } catch (e) { showToast("Arquivo inválido"); }
+    };
+    reader.readAsText(file);
+  };
+
+  /* ---- navigation ---- */
+  const goToday = () => { const t = new Date(); setCursorDate(t); setSelectedDate(todayKey()); };
+  const stepMonth = (n) => setCursorDate((d) => addMonths(d, n));
+  const stepWeek = (n) => setCursorDate((d) => addDays(d, n * 7));
+  const stepDay = (n) => { const nd = addDays(parseKey(selectedDate), n); setSelectedDate(keyOf(nd)); setCursorDate(nd); };
+
+  const headerLabel = useMemo(() => {
+    if (view === "day") { const d = parseKey(selectedDate); return `${d.getDate()} de ${MONTH_LABELS[d.getMonth()]}`; }
+    if (view === "week") { const s = startOfWeek(cursorDate), e = addDays(s, 6);
+      return s.getMonth() === e.getMonth() ? `${MONTH_LABELS[s.getMonth()]} ${s.getFullYear()}` : `${MONTH_LABELS[s.getMonth()].slice(0,3)}–${MONTH_LABELS[e.getMonth()].slice(0,3)} ${e.getFullYear()}`;
+    }
+    return `${MONTH_LABELS[cursorDate.getMonth()]} ${cursorDate.getFullYear()}`;
+  }, [view, cursorDate, selectedDate]);
+
+  /* swipe */
+  const touchRef = useRef(null);
+  const onTouchStart = (e) => { touchRef.current = e.touches[0].clientX; };
+  const onTouchEnd = (e) => {
+    if (touchRef.current == null) return;
+    const dx = e.changedTouches[0].clientX - touchRef.current;
+    if (Math.abs(dx) > 60) {
+      const dir = dx > 0 ? -1 : 1;
+      if (view === "month") stepMonth(dir);
+      else if (view === "week") stepWeek(dir);
+      else stepDay(dir);
+    }
+    touchRef.current = null;
+  };
+
+  /* ------------------------------------------------------------------ */
+  /* Stats                                                                */
+  /* ------------------------------------------------------------------ */
+  const statsData = useMemo(() => {
+    const now = new Date();
+    const weekStart = startOfWeek(now), weekEnd = addDays(weekStart, 6);
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const countIn = (start, end) => {
+      const counts = {};
+      for (const ev of events) {
+        const d = parseKey(ev.date);
+        if (d >= start && d <= end) {
+          const key = ev.categoryId || "sem-categoria";
+          counts[key] = (counts[key] || 0) + 1;
+        }
+      }
+      return counts;
+    };
+    return { week: countIn(weekStart, weekEnd), month: countIn(monthStart, monthEnd) };
+  }, [events]);
+
+  if (!loaded) {
+    return (
+      <div className="min-h-[100dvh] bg-neutral-900 flex items-center justify-center">
+        <div className="text-neutral-500 text-sm animate-pulse">Carregando agenda…</div>
+      </div>
+    );
+  }
+
+  /* ------------------------------------------------------------------ */
+
+  return (
+    <div className={`min-h-[100dvh] w-full flex justify-center ${isLight ? "bg-neutral-100" : "bg-neutral-900"}`}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap');
+        * { font-family: 'Inter', system-ui, sans-serif; }
+        ::-webkit-scrollbar { width: 0; height: 0; }
+      `}</style>
+
+      <div className={`w-full max-w-md min-h-[100dvh] flex flex-col relative ${isLight ? "bg-white text-neutral-800" : "bg-neutral-900 text-neutral-100"}`}>
+
+        {/* Header */}
+        <div className={`sticky top-0 z-30 backdrop-blur-md ${isLight ? "bg-white/90 border-neutral-200" : "bg-neutral-900/90 border-neutral-800"} border-b px-4 pt-4 pb-3`}>
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <p className={`text-xs ${isLight ? "text-neutral-500" : "text-neutral-500"}`}>Sua agenda</p>
+              <h1 className="text-2xl font-semibold -mt-0.5" style={{ fontFamily: "'Fraunces', serif" }}>{headerLabel}</h1>
+            </div>
+            <div className="flex items-center gap-1">
+              <IconBtn onClick={() => setSearchOpen(true)} label="Pesquisar"><Search size={19} className={isLight ? "text-neutral-500" : ""} /></IconBtn>
+              <IconBtn onClick={() => setFilterOpen(true)} label="Filtros" active={hasFilters}><SlidersHorizontal size={19} className={isLight && !hasFilters ? "text-neutral-500" : ""} /></IconBtn>
+              <IconBtn onClick={() => setMenuOpen(true)} label="Menu"><Menu size={19} className={isLight ? "text-neutral-500" : ""} /></IconBtn>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div className={`flex items-center gap-1 rounded-full p-1 ${isLight ? "bg-neutral-100" : "bg-neutral-800"}`}>
+              {[["month","Mês"],["week","Semana"],["day","Dia"]].map(([v,l]) => (
+                <button key={v} onClick={() => setView(v)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${view === v ? "bg-violet-600 text-white" : isLight ? "text-neutral-500" : "text-neutral-400"}`}>
+                  {l}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-0.5">
+              <IconBtn onClick={() => (view === "month" ? stepMonth(-1) : view === "week" ? stepWeek(-1) : stepDay(-1))} label="Anterior"><ChevronLeft size={18} className={isLight ? "text-neutral-500" : ""} /></IconBtn>
+              <button onClick={goToday} className={`text-xs font-medium px-2 py-1 rounded-full ${isLight ? "text-violet-600" : "text-violet-400"}`}>Hoje</button>
+              <IconBtn onClick={() => (view === "month" ? stepMonth(1) : view === "week" ? stepWeek(1) : stepDay(1))} label="Próximo"><ChevronRight size={18} className={isLight ? "text-neutral-500" : ""} /></IconBtn>
+            </div>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto pb-28" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+          {view === "month" && (
+            <MonthView
+              cursorDate={cursorDate}
+              eventsByDate={hasFilters || query ? filteredByDate : eventsByDate}
+              selectedDate={selectedDate}
+              isLight={isLight}
+              onSelectDay={(k) => { setSelectedDate(k); setDaySheetOpen(true); }}
+            />
+          )}
+          {view === "week" && (
+            <WeekView
+              cursorDate={cursorDate}
+              eventsByDate={hasFilters || query ? filteredByDate : eventsByDate}
+              selectedDate={selectedDate}
+              isLight={isLight}
+              onSelectDay={(k) => { setSelectedDate(k); setCursorDate(parseKey(k)); setView("day"); }}
+            />
+          )}
+          {view === "day" && (
+            <DayView
+              dateKey={selectedDate}
+              events={(hasFilters || query ? filteredByDate : eventsByDate)[selectedDate] || []}
+              isLight={isLight}
+              categoryById={categoryById}
+              onEventClick={setDetailEvent}
+              onSlotClick={(time) => { setFormInitial({ date: selectedDate, startTime: time, endTime: minutesLabel(timeToMinutes(time) + 60) }); setEditingId(null); setFormOpen(true); }}
+            />
+          )}
+        </div>
+
+        {/* FAB */}
+        <button
+          onClick={() => openCreateForm(selectedDate)}
+          className="absolute bottom-7 right-6 z-30 w-14 h-14 rounded-full bg-violet-600 text-white shadow-lg shadow-violet-950/50 flex items-center justify-center active:scale-90 transition-transform"
+        >
+          <Plus size={26} />
+        </button>
+
+        {/* Toast */}
+        {toast && (
+          <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-50 bg-neutral-700 text-neutral-100 text-sm px-4 py-2 rounded-full shadow-lg whitespace-nowrap">
+            {toast}
+          </div>
+        )}
+
+        {/* Day sheet (month view tap) */}
+        <Sheet open={daySheetOpen} onClose={() => setDaySheetOpen(false)}
+          title={parseKey(selectedDate).toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" })}>
+          <div className="flex flex-col">
+            {((hasFilters || query ? filteredByDate : eventsByDate)[selectedDate] || []).length === 0 && (
+              <div className="py-6 text-center text-neutral-500 text-sm">Nenhum compromisso neste dia.</div>
+            )}
+            {((hasFilters || query ? filteredByDate : eventsByDate)[selectedDate] || []).map((ev) => (
+              <EventRow key={ev.id} ev={ev} category={categoryById[ev.categoryId]} onClick={() => setDetailEvent(ev)} />
+            ))}
+            <button onClick={() => openCreateForm(selectedDate)}
+              className="mt-1 flex items-center justify-center gap-2 py-3 rounded-2xl border border-dashed border-neutral-600 text-neutral-400 text-sm">
+              <Plus size={16} /> Adicionar compromisso
+            </button>
+          </div>
+        </Sheet>
+
+        {/* Create/Edit form */}
+        <Sheet open={formOpen} onClose={() => setFormOpen(false)} title={editingId ? "Editar evento" : "Novo evento"} maxHeight="92vh">
+          {formOpen && (
+            <EventForm
+              key={editingId || "new"}
+              initial={formInitial || {}}
+              categories={categories}
+              onCancel={() => setFormOpen(false)}
+              onSave={handleSaveForm}
+            />
+          )}
+        </Sheet>
+
+        {/* Event detail */}
+        <Sheet open={!!detailEvent} onClose={() => setDetailEvent(null)}>
+          {detailEvent && (
+            <div className="flex flex-col gap-5 pt-1">
+              <div className="flex items-start gap-3">
+                <div className={`w-2.5 h-2.5 rounded-full mt-2 shrink-0 ${colorOf(detailEvent.color).dot}`} />
+                <div className="flex-1">
+                  <h2 className="text-xl font-semibold" style={{ fontFamily: "'Fraunces', serif" }}>{detailEvent.title}</h2>
+                  <p className="text-sm text-neutral-400 mt-0.5">
+                    {parseKey(detailEvent.date).toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "short" })} · {formatHM(detailEvent.startTime)}–{formatHM(detailEvent.endTime)}
+                  </p>
+                </div>
+              </div>
+
+              {detailEvent.location && <p className="text-sm text-neutral-300 flex items-center gap-2"><MapPin size={14} className="text-neutral-500" />{detailEvent.location}</p>}
+              {detailEvent.description && <p className="text-sm text-neutral-400 leading-relaxed">{detailEvent.description}</p>}
+              {categoryById[detailEvent.categoryId] && (
+                <span className={`self-start text-xs px-2.5 py-1 rounded-full ${colorOf(detailEvent.color).soft} ${colorOf(detailEvent.color).text}`}>
+                  {categoryById[detailEvent.categoryId].name}
+                </span>
+              )}
+              {detailEvent.reminder != null && detailEvent.reminder >= 0 && (
+                <p className="text-xs text-neutral-500 flex items-center gap-2"><Bell size={13} />{REMINDERS.find(r => r.value === detailEvent.reminder)?.label}</p>
+              )}
+              {detailEvent.seriesId && (
+                <p className="text-xs text-neutral-500 flex items-center gap-2"><Repeat size={13} />Parte de uma série recorrente</p>
+              )}
+
+              <div>
+                <div className="text-xs text-neutral-500 mb-2">Alterar cor</div>
+                <div className="flex flex-wrap gap-2.5">
+                  {COLORS.map((c) => (
+                    <button key={c.key} onClick={() => changeColor(detailEvent, c.key)}
+                      className={`w-7 h-7 rounded-full ${c.dot} ${detailEvent.color === c.key ? `ring-2 ring-offset-2 ring-offset-neutral-800 ${c.ring}` : ""}`} />
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button onClick={() => requestEdit(detailEvent)} className="flex items-center justify-center gap-2 py-3 rounded-2xl bg-neutral-700 text-neutral-200 text-sm font-medium active:scale-95 transition-transform">
+                  <Pencil size={15} /> Editar
+                </button>
+                <button onClick={() => duplicateEvent(detailEvent)} className="flex items-center justify-center gap-2 py-3 rounded-2xl bg-neutral-700 text-neutral-200 text-sm font-medium active:scale-95 transition-transform">
+                  <Copy size={15} /> Duplicar
+                </button>
+                <button onClick={() => requestDelete(detailEvent)} className="col-span-2 flex items-center justify-center gap-2 py-3 rounded-2xl bg-red-500/10 text-red-400 text-sm font-medium active:scale-95 transition-transform">
+                  <Trash2 size={15} /> Excluir
+                </button>
+              </div>
+            </div>
+          )}
+        </Sheet>
+
+        {/* Series prompt */}
+        <Sheet open={!!seriesPrompt} onClose={() => setSeriesPrompt(null)} title={seriesPrompt?.action === "delete" ? "Excluir evento recorrente" : "Editar evento recorrente"}>
+          {seriesPrompt && (
+            <div className="flex flex-col gap-3 pt-1">
+              <p className="text-sm text-neutral-400">Este compromisso faz parte de uma série. O que deseja fazer?</p>
+              <button
+                onClick={() => seriesPrompt.action === "delete" ? deleteEvent(seriesPrompt.event, false) : (openEditForm(seriesPrompt.event), setSeriesPrompt(null))}
+                className="py-3 rounded-2xl bg-neutral-700 text-neutral-100 text-sm font-medium">
+                Apenas esta ocorrência
+              </button>
+              <button
+                onClick={() => seriesPrompt.action === "delete" ? deleteEvent(seriesPrompt.event, true) : (openEditForm(seriesPrompt.event), setSeriesPrompt(null))}
+                className="py-3 rounded-2xl bg-red-500/10 text-red-400 text-sm font-medium">
+                Toda a série
+              </button>
+              <button onClick={() => setSeriesPrompt(null)} className="py-3 rounded-2xl text-neutral-500 text-sm">Cancelar</button>
+            </div>
+          )}
+        </Sheet>
+
+        {/* Search overlay */}
+        {searchOpen && (
+          <div className={`absolute inset-0 z-50 flex justify-center ${isLight ? "bg-white" : "bg-neutral-900"}`}>
+            <div className="w-full flex flex-col h-full">
+              <div className="flex items-center gap-2 p-4 border-b border-neutral-700">
+                <IconBtn onClick={() => { setSearchOpen(false); setQuery(""); }} label="Voltar"><ArrowLeft size={19} /></IconBtn>
+                <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Pesquisar eventos…"
+                  className={`flex-1 bg-transparent outline-none text-lg ${isLight ? "text-neutral-800 placeholder-neutral-400" : "text-neutral-100 placeholder-neutral-500"}`} />
+              </div>
+              <div className="flex-1 overflow-y-auto p-4">
+                {query.trim() === "" && <p className="text-sm text-neutral-500 text-center mt-8">Digite para pesquisar por título ou descrição.</p>}
+                {query.trim() !== "" && filteredEvents.length === 0 && <p className="text-sm text-neutral-500 text-center mt-8">Nenhum evento encontrado.</p>}
+                {query.trim() !== "" && filteredEvents
+                  .slice().sort((a,b) => a.date.localeCompare(b.date))
+                  .map((ev) => (
+                    <button key={ev.id} onClick={() => { setSelectedDate(ev.date); setCursorDate(parseKey(ev.date)); setSearchOpen(false); setQuery(""); setDetailEvent(ev); }}
+                      className="w-full flex items-center gap-3 py-3 border-b border-neutral-800 text-left">
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${colorOf(ev.color).dot}`} />
+                      <div className="flex-1 min-w-0">
+                        <p className={`font-medium truncate ${isLight ? "text-neutral-800" : "text-neutral-100"}`}>{ev.title}</p>
+                        <p className="text-xs text-neutral-500">{parseKey(ev.date).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" })} · {formatHM(ev.startTime)}</p>
+                      </div>
+                    </button>
+                  ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Filters */}
+        <Sheet open={filterOpen} onClose={() => setFilterOpen(false)} title="Filtros">
+          <div className="flex flex-col gap-5 pt-1">
+            <div>
+              <div className="text-sm text-neutral-500 mb-2">Cor</div>
+              <div className="flex flex-wrap gap-2.5">
+                {COLORS.map((c) => (
+                  <button key={c.key} onClick={() => setActiveColors((a) => a.includes(c.key) ? a.filter(x => x !== c.key) : [...a, c.key])}
+                    className={`w-8 h-8 rounded-full ${c.dot} ${activeColors.includes(c.key) ? `ring-2 ring-offset-2 ring-offset-neutral-800 ${c.ring}` : "opacity-50"}`} />
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="text-sm text-neutral-500 mb-2">Categoria</div>
+              <div className="flex flex-wrap gap-2">
+                {categories.map((cat) => {
+                  const cc = colorOf(cat.color);
+                  const on = activeCats.includes(cat.id);
+                  return (
+                    <button key={cat.id} onClick={() => setActiveCats((a) => on ? a.filter(x => x !== cat.id) : [...a, cat.id])}
+                      className={`px-3 py-1.5 rounded-full text-sm border flex items-center gap-1.5 ${on ? `border-transparent ${cc.soft} ${cc.text}` : "border-neutral-600 text-neutral-400"}`}>
+                      <span className={`w-2 h-2 rounded-full ${cc.dot}`} />{cat.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <button onClick={() => { setActiveColors([]); setActiveCats([]); }} className="text-sm text-violet-400 self-start">Limpar filtros</button>
+          </div>
+        </Sheet>
+
+        {/* Stats */}
+        <Sheet open={statsOpen} onClose={() => setStatsOpen(false)} title="Estatísticas">
+          <StatsPanel data={statsData} categories={categories} categoryById={categoryById} />
+        </Sheet>
+
+        {/* Menu */}
+        <Sheet open={menuOpen} onClose={() => setMenuOpen(false)} title="Menu">
+          <div className="flex flex-col gap-1 pt-1">
+            <button onClick={() => setTheme(isLight ? "dark" : "light")} className="flex items-center gap-3 px-2 py-3 text-sm">
+              {isLight ? <Moon size={17} /> : <Sun size={17} />} {isLight ? "Tema escuro" : "Tema claro"}
+            </button>
+            <button onClick={() => { setStatsOpen(true); setMenuOpen(false); }} className="flex items-center gap-3 px-2 py-3 text-sm">
+              <BarChart3 size={17} /> Estatísticas
+            </button>
+            <button onClick={exportJSON} className="flex items-center gap-3 px-2 py-3 text-sm">
+              <Download size={17} /> Exportar backup (JSON)
+            </button>
+            <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-3 px-2 py-3 text-sm">
+              <Upload size={17} /> Importar backup (JSON)
+            </button>
+            <input ref={fileInputRef} type="file" accept="application/json" className="hidden"
+              onChange={(e) => { if (e.target.files[0]) importJSON(e.target.files[0]); e.target.value = ""; setMenuOpen(false); }} />
+            <p className="text-xs text-neutral-500 px-2 pt-3">Seus dados ficam salvos automaticamente neste dispositivo.</p>
+          </div>
+        </Sheet>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Month view                                                          */
+/* ------------------------------------------------------------------ */
+
+function MonthView({ cursorDate, eventsByDate, selectedDate, isLight, onSelectDay }) {
+  const weeks = monthMatrix(cursorDate.getFullYear(), cursorDate.getMonth());
+  const month = cursorDate.getMonth();
+  const tKey = todayKey();
+  const VISIBLE = 2;
+
+  return (
+    <div className="px-2 pt-3">
+      <div className="grid grid-cols-7 mb-1">
+        {WEEKDAY_LABELS.map((d) => (
+          <div key={d} className={`text-center text-[11px] font-medium py-1 ${isLight ? "text-neutral-400" : "text-neutral-500"}`}>{d}</div>
+        ))}
+      </div>
+      <div className="flex flex-col gap-1">
+        {weeks.map((week, wi) => (
+          <div key={wi} className="grid grid-cols-7 gap-1">
+            {week.map((d) => {
+              const k = keyOf(d);
+              const inMonth = d.getMonth() === month;
+              const dayEvents = eventsByDate[k] || [];
+              const isToday = k === tKey;
+              const isSelected = k === selectedDate;
+              return (
+                <button key={k} onClick={() => onSelectDay(k)}
+                  className={`relative min-h-[74px] rounded-xl flex flex-col items-stretch p-1 pt-1 transition-colors overflow-hidden ${
+                    isSelected ? "bg-violet-600" : isLight ? "hover:bg-neutral-100" : "hover:bg-neutral-800"
+                  }`}>
+                  <span className={`text-[12px] leading-none w-5 h-5 flex items-center justify-center rounded-full shrink-0 self-start ${
+                    isSelected ? "text-white font-semibold" :
+                    isToday ? "bg-violet-500/20 text-violet-300 font-semibold" :
+                    inMonth ? (isLight ? "text-neutral-700" : "text-neutral-200") : (isLight ? "text-neutral-300" : "text-neutral-600")
+                  }`}>{d.getDate()}</span>
+
+                  <div className="flex flex-col gap-0.5 mt-1 w-full">
+                    {dayEvents.slice(0, VISIBLE).map((ev) => {
+                      const c = colorOf(ev.color);
+                      return (
+                        <span key={ev.id}
+                          title={ev.title}
+                          className={`text-[9px] leading-tight font-medium px-1 py-[1px] rounded truncate w-full text-left ${
+                            isSelected ? "bg-white/25 text-white" : `${c.soft} ${c.text}`
+                          }`}>
+                          {ev.title}
+                        </span>
+                      );
+                    })}
+                    {dayEvents.length > VISIBLE && (
+                      <span className={`text-[9px] leading-tight px-1 ${isSelected ? "text-white/80" : isLight ? "text-neutral-400" : "text-neutral-500"}`}>
+                        +{dayEvents.length - VISIBLE} mais
+                      </span>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Week view                                                            */
+/* ------------------------------------------------------------------ */
+
+function WeekView({ cursorDate, eventsByDate, selectedDate, isLight, onSelectDay }) {
+  const start = startOfWeek(cursorDate);
+  const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
+  const tKey = todayKey();
+  return (
+    <div className="px-3 pt-3 flex flex-col gap-2">
+      {days.map((d) => {
+        const k = keyOf(d);
+        const dayEvents = eventsByDate[k] || [];
+        const isToday = k === tKey;
+        return (
+          <button key={k} onClick={() => onSelectDay(k)}
+            className={`w-full text-left rounded-2xl px-4 py-3 flex items-center gap-3 transition-colors ${isLight ? "bg-neutral-50 hover:bg-neutral-100" : "bg-neutral-800/60 hover:bg-neutral-800"}`}>
+            <div className="flex flex-col items-center w-10 shrink-0">
+              <span className={`text-[10px] uppercase ${isLight ? "text-neutral-400" : "text-neutral-500"}`}>{WEEKDAY_LABELS[d.getDay()]}</span>
+              <span className={`text-lg font-semibold leading-none mt-0.5 ${isToday ? "text-violet-400" : ""}`} style={{ fontFamily: "'Fraunces', serif" }}>{d.getDate()}</span>
+            </div>
+            <div className="flex-1 min-w-0">
+              {dayEvents.length === 0 ? (
+                <span className="text-xs text-neutral-500">Sem compromissos</span>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  {dayEvents.slice(0, 3).map((ev) => (
+                    <div key={ev.id} className="flex items-center gap-2 text-xs">
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${colorOf(ev.color).dot}`} />
+                      <span className={`truncate ${isLight ? "text-neutral-600" : "text-neutral-300"}`}>{ev.title}</span>
+                      <span className="text-neutral-500 shrink-0">{formatHM(ev.startTime)}</span>
+                    </div>
+                  ))}
+                  {dayEvents.length > 3 && <span className="text-[11px] text-neutral-500">+{dayEvents.length - 3} mais</span>}
+                </div>
+              )}
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Day view (timeline)                                                  */
+/* ------------------------------------------------------------------ */
+
+function DayView({ dateKey, events, isLight, categoryById, onEventClick, onSlotClick }) {
+  const HOUR_H = 60;
+  const hours = Array.from({ length: 24 }, (_, i) => i);
+
+  return (
+    <div className="px-3 pt-4">
+      <div className="relative" style={{ height: HOUR_H * 24 }}>
+        {hours.map((h) => (
+          <div key={h} className="absolute left-0 right-0 flex items-start gap-2" style={{ top: h * HOUR_H }}>
+            <span className={`text-[10px] w-9 text-right pt-0 ${isLight ? "text-neutral-400" : "text-neutral-500"}`}>{pad2(h)}:00</span>
+            <div onClick={() => onSlotClick(`${pad2(h)}:00`)}
+              className={`flex-1 border-t cursor-pointer ${isLight ? "border-neutral-200" : "border-neutral-800"}`} style={{ height: HOUR_H }} />
+          </div>
+        ))}
+
+        {events.map((ev) => {
+          const start = timeToMinutes(ev.startTime);
+          const end = Math.max(timeToMinutes(ev.endTime), start + 20);
+          const top = (start / 60) * HOUR_H;
+          const height = ((end - start) / 60) * HOUR_H - 3;
+          const c = colorOf(ev.color);
+          return (
+            <button key={ev.id} onClick={() => onEventClick(ev)}
+              className={`absolute left-11 right-1 rounded-xl px-3 py-1.5 text-left overflow-hidden ${c.soft} border-l-4`}
+              style={{ top, height: Math.max(height, 26), borderLeftColor: c.hex }}>
+              <p className={`text-xs font-medium truncate ${isLight ? "text-neutral-700" : "text-neutral-100"}`}>{ev.title}</p>
+              {height > 32 && <p className="text-[10px] text-neutral-500">{formatHM(ev.startTime)}–{formatHM(ev.endTime)}</p>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Stats panel                                                          */
+/* ------------------------------------------------------------------ */
+
+function StatsPanel({ data, categories, categoryById }) {
+  const renderBars = (counts) => {
+    const entries = Object.entries(counts);
+    const max = Math.max(1, ...entries.map(([, v]) => v));
+    if (entries.length === 0) return <p className="text-sm text-neutral-500">Nenhum evento neste período.</p>;
+    return (
+      <div className="flex flex-col gap-2.5">
+        {entries.sort((a, b) => b[1] - a[1]).map(([catId, count]) => {
+          const cat = categoryById[catId];
+          const c = colorOf(cat?.color || "gray");
+          return (
+            <div key={catId} className="flex items-center gap-3">
+              <span className="text-xs w-20 truncate text-neutral-400">{cat ? cat.name : "Sem categoria"}</span>
+              <div className="flex-1 h-2.5 rounded-full bg-neutral-700 overflow-hidden">
+                <div className={`h-full ${c.dot}`} style={{ width: `${(count / max) * 100}%` }} />
+              </div>
+              <span className="text-xs text-neutral-400 w-4 text-right">{count}</span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  return (
+    <div className="flex flex-col gap-6 pt-1">
+      <div>
+        <h3 className="text-sm font-medium text-neutral-300 mb-3">Esta semana</h3>
+        {renderBars(data.week)}
+      </div>
+      <div>
+        <h3 className="text-sm font-medium text-neutral-300 mb-3">Este mês</h3>
+        {renderBars(data.month)}
+      </div>
+    </div>
+  );
+}
