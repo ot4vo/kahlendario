@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import {
   ChevronLeft, ChevronRight, Plus, Search, SlidersHorizontal, X, Clock,
   MapPin, Bell, Repeat, Copy, Trash2, Pencil, Check,
-  Download, Upload, Menu, ChevronDown, CalendarDays, ArrowLeft, Palette
+  Download, Upload, Menu, ChevronDown, ChevronUp, CalendarDays, ArrowLeft, Palette
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -160,6 +160,18 @@ async function saveStorage(key, value) {
 /* Small UI atoms                                                     */
 /* ------------------------------------------------------------------ */
 
+/* Tracks the window width so a few components can size themselves up on
+   a tablet instead of staying stuck at tiny phone proportions. */
+function useViewportWidth() {
+  const [width, setWidth] = useState(() => (typeof window !== "undefined" ? window.innerWidth : 390));
+  useEffect(() => {
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return width;
+}
+
 function IconBtn({ onClick, children, label, active }) {
   return (
     <button
@@ -194,7 +206,6 @@ function Sheet({ open, onClose, children, title, maxHeight = "85vh" }) {
         )}
         <div className="overflow-y-auto px-5 pb-8">{children}</div>
       </div>
-      <style>{`@keyframes slideUp{from{transform:translateY(24px);opacity:.6}to{transform:translateY(0);opacity:1}}`}</style>
     </div>
   );
 }
@@ -286,26 +297,6 @@ function EventForm({ initial, categories, onCancel, onSave }) {
         </div>
       </div>
 
-      <div>
-        <div className="text-sm text-neutral-500 mb-2">Categoria</div>
-        <div className="flex flex-wrap gap-2">
-          <button onClick={() => setCategoryId("")}
-            className={`px-3 py-1.5 rounded-full text-sm border ${categoryId === "" ? "border-violet-500 text-violet-300 bg-violet-500/10" : "border-neutral-600 text-neutral-400"}`}>
-            Nenhuma
-          </button>
-          {categories.map((cat) => {
-            const cc = colorOf(cat.color);
-            return (
-              <button key={cat.id} onClick={() => setCategoryId(cat.id)}
-                className={`px-3 py-1.5 rounded-full text-sm border flex items-center gap-1.5 ${categoryId === cat.id ? `border-transparent ${cc.soft} ${cc.text}` : "border-neutral-600 text-neutral-400"}`}>
-                <span className={`w-2 h-2 rounded-full ${cc.dot}`} />
-                {cat.name}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
       <label className="flex items-center gap-3 bg-neutral-700/60 rounded-2xl px-4 py-3">
         <Bell size={18} className="text-neutral-500 shrink-0" />
         <select value={reminder} onChange={(e) => setReminder(Number(e.target.value))}
@@ -360,16 +351,17 @@ function EventForm({ initial, categories, onCancel, onSave }) {
 /* Event chip / row                                                   */
 /* ------------------------------------------------------------------ */
 
-function EventRow({ ev, category, onClick }) {
+function EventRow({ ev, category, onClick, onMoveUp, onMoveDown }) {
   const c = colorOf(ev.color);
+  const canReorder = onMoveUp || onMoveDown;
   return (
-    <button onClick={onClick} className="w-full flex items-stretch gap-3 text-left group">
+    <div className="w-full flex items-stretch gap-3 group">
       <div className="flex flex-col items-center pt-0.5 w-12 shrink-0">
         <span className="text-xs font-medium text-neutral-300">{formatHM(ev.startTime)}</span>
         <span className="text-[10px] text-neutral-500">{formatHM(ev.endTime)}</span>
       </div>
       <div className={`w-1 rounded-full ${c.dot} shrink-0`} />
-      <div className="flex-1 bg-neutral-700/50 group-active:bg-neutral-700 rounded-2xl px-4 py-3 mb-2 transition-colors min-w-0">
+      <button onClick={onClick} className="flex-1 text-left bg-neutral-700/50 active:bg-neutral-700 rounded-2xl px-4 py-3 mb-2 transition-colors min-w-0">
         <div className="flex items-center gap-2">
           <p className="text-neutral-100 font-medium break-words">{ev.title}</p>
           {ev.repeat?.type && ev.repeat.type !== "none" && <Repeat size={12} className="text-neutral-500 shrink-0" />}
@@ -381,8 +373,20 @@ function EventRow({ ev, category, onClick }) {
         {category && (
           <span className={`inline-block mt-2 text-[10px] px-2 py-0.5 rounded-full ${c.soft} ${c.text}`}>{category.name}</span>
         )}
-      </div>
-    </button>
+      </button>
+      {canReorder && (
+        <div className="flex flex-col justify-center gap-1 shrink-0 mb-2">
+          <button aria-label="Mover para cima" onClick={onMoveUp} disabled={!onMoveUp}
+            className="w-7 h-7 flex items-center justify-center rounded-full text-neutral-500 hover:text-neutral-200 hover:bg-neutral-700 disabled:opacity-25 disabled:hover:bg-transparent transition-colors">
+            <ChevronUp size={16} />
+          </button>
+          <button aria-label="Mover para baixo" onClick={onMoveDown} disabled={!onMoveDown}
+            className="w-7 h-7 flex items-center justify-center rounded-full text-neutral-500 hover:text-neutral-200 hover:bg-neutral-700 disabled:opacity-25 disabled:hover:bg-transparent transition-colors">
+            <ChevronDown size={16} />
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -395,7 +399,7 @@ export default function CalendarApp() {
   const [events, setEvents] = useState([]);
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
 
-  const [view, setView] = useState("month"); // month | week | day
+  const [view, setView] = useState("week"); // month | week | day
   const [cursorDate, setCursorDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(todayKey());
 
@@ -441,11 +445,16 @@ export default function CalendarApp() {
 
   const isLight = false; // Kahlendario é sempre no tema escuro
 
+  /* Sorts a day's events by manual order (if the user has reordered them),
+     falling back to start time for events that haven't been reordered. */
+  const sortDay = (list) =>
+    list.sort((a, b) => (a.order ?? timeToMinutes(a.startTime)) - (b.order ?? timeToMinutes(b.startTime)));
+
   /* ---- derived ---- */
   const eventsByDate = useMemo(() => {
     const map = {};
     for (const ev of events) { (map[ev.date] = map[ev.date] || []).push(ev); }
-    for (const k in map) map[k].sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+    for (const k in map) sortDay(map[k]);
     return map;
   }, [events]);
 
@@ -489,7 +498,7 @@ export default function CalendarApp() {
   const filteredByDate = useMemo(() => {
     const map = {};
     for (const ev of filteredEvents) { (map[ev.date] = map[ev.date] || []).push(ev); }
-    for (const k in map) map[k].sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+    for (const k in map) sortDay(map[k]);
     return map;
   }, [filteredEvents]);
 
@@ -531,6 +540,19 @@ export default function CalendarApp() {
     setDetailEvent(null);
     setSeriesPrompt(null);
     showToast(wholeSeries ? "Série excluída" : "Evento excluído");
+  };
+
+  /* Moves an event up/down within its day's list, independent of its start
+     time. Reassigns a manual "order" to every event of that day so the new
+     sequence sticks even though the times themselves never change. */
+  const moveEventInDay = (dateKey, id, direction) => {
+    const list = (eventsByDate[dateKey] || []).slice();
+    const idx = list.findIndex((e) => e.id === id);
+    const swapWith = idx + direction;
+    if (idx === -1 || swapWith < 0 || swapWith >= list.length) return;
+    [list[idx], list[swapWith]] = [list[swapWith], list[idx]];
+    const orderById = Object.fromEntries(list.map((e, i) => [e.id, i]));
+    setEvents((prev) => prev.map((e) => (e.id in orderById ? { ...e, order: orderById[e.id] } : e)));
   };
 
   const duplicateEvent = (ev) => {
@@ -686,14 +708,8 @@ export default function CalendarApp() {
   /* ------------------------------------------------------------------ */
 
   return (
-    <div className={`min-h-[100dvh] w-full flex justify-center ${isLight ? "bg-neutral-100" : "bg-neutral-900"}`}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&display=swap');
-        * { font-family: 'Inter', system-ui, sans-serif; }
-        ::-webkit-scrollbar { width: 0; height: 0; }
-      `}</style>
-
-      <div className={`w-full max-w-md min-h-[100dvh] flex flex-col relative ${isLight ? "bg-white text-neutral-800" : "bg-neutral-900 text-neutral-100"}`}>
+    <div className={`h-[100dvh] w-full flex justify-center overflow-hidden ${isLight ? "bg-neutral-100" : "bg-neutral-900"}`}>
+      <div className={`w-full max-w-md md:max-w-2xl lg:max-w-3xl h-[100dvh] flex flex-col relative overflow-hidden ${isLight ? "bg-white text-neutral-800" : "bg-neutral-900 text-neutral-100"}`}>
 
         {/* Header */}
         <div className={`sticky top-0 z-30 backdrop-blur-md ${isLight ? "bg-white/90 border-neutral-200" : "bg-neutral-900/90 border-neutral-800"} border-b px-4 pt-4 pb-3`}>
@@ -744,6 +760,7 @@ export default function CalendarApp() {
               selectedDate={selectedDate}
               isLight={isLight}
               onSelectDay={(k) => { setSelectedDate(k); setCursorDate(parseKey(k)); setView("day"); }}
+              onEventClick={setDetailEvent}
             />
           )}
           {view === "day" && (
@@ -780,8 +797,10 @@ export default function CalendarApp() {
             {((hasFilters || query ? filteredByDate : eventsByDate)[selectedDate] || []).length === 0 && (
               <div className="py-6 text-center text-neutral-500 text-sm">Nenhum compromisso neste dia.</div>
             )}
-            {((hasFilters || query ? filteredByDate : eventsByDate)[selectedDate] || []).map((ev) => (
-              <EventRow key={ev.id} ev={ev} category={categoryById[ev.categoryId]} onClick={() => setDetailEvent(ev)} />
+            {((hasFilters || query ? filteredByDate : eventsByDate)[selectedDate] || []).map((ev, i, list) => (
+              <EventRow key={ev.id} ev={ev} category={categoryById[ev.categoryId]} onClick={() => setDetailEvent(ev)}
+                onMoveUp={!hasFilters && !query && i > 0 ? () => moveEventInDay(selectedDate, ev.id, -1) : null}
+                onMoveDown={!hasFilters && !query && i < list.length - 1 ? () => moveEventInDay(selectedDate, ev.id, 1) : null} />
             ))}
             <button onClick={() => openCreateForm(selectedDate)}
               className="mt-1 flex items-center justify-center gap-2 py-3 rounded-2xl border border-dashed border-neutral-600 text-neutral-400 text-sm">
@@ -1049,10 +1068,12 @@ export default function CalendarApp() {
 /* ------------------------------------------------------------------ */
 
 function MonthView({ cursorDate, eventsByDate, selectedDate, isLight, onSelectDay }) {
+  const width = useViewportWidth();
+  const isTablet = width >= 700;
   const weeks = monthMatrix(cursorDate.getFullYear(), cursorDate.getMonth());
   const month = cursorDate.getMonth();
   const tKey = todayKey();
-  const VISIBLE = 3;
+  const VISIBLE = isTablet ? 5 : 3;
 
   return (
     <div className="px-2 pt-3">
@@ -1072,7 +1093,7 @@ function MonthView({ cursorDate, eventsByDate, selectedDate, isLight, onSelectDa
               const isSelected = k === selectedDate;
               return (
                 <button key={k} onClick={() => onSelectDay(k)}
-                  className={`relative min-h-[74px] rounded-xl flex flex-col items-stretch p-1 pt-1 transition-colors overflow-hidden border ${
+                  className={`relative ${isTablet ? "min-h-[110px]" : "min-h-[74px]"} rounded-xl flex flex-col items-stretch p-1 pt-1 transition-colors overflow-hidden border ${
                     isSelected
                       ? "bg-violet-600 border-violet-600"
                       : isLight
@@ -1091,7 +1112,7 @@ function MonthView({ cursorDate, eventsByDate, selectedDate, isLight, onSelectDa
                       return (
                         <span key={ev.id}
                           title={ev.title}
-                          className={`text-[9px] leading-tight font-medium px-1 py-[1px] rounded truncate w-full text-left ${
+                          className={`${isTablet ? "text-[11px]" : "text-[9px]"} leading-tight font-medium px-1 py-[1px] rounded truncate w-full text-left ${
                             isSelected ? "bg-white/25 text-white" : `${c.soft} ${c.text}`
                           }`}>
                           {ev.title}
@@ -1118,42 +1139,154 @@ function MonthView({ cursorDate, eventsByDate, selectedDate, isLight, onSelectDa
 /* Week view                                                            */
 /* ------------------------------------------------------------------ */
 
-function WeekView({ cursorDate, eventsByDate, selectedDate, isLight, onSelectDay }) {
+/* Lays out one day's events into columns so overlapping events sit
+   side-by-side (like Google Calendar) instead of stacking on top of
+   each other. Returns each event with its start/end in minutes, its
+   column index, and how many columns its overlap-cluster needs. */
+function layoutDayEvents(dayEvents) {
+  const sorted = [...dayEvents].sort((a, b) => {
+    const as = timeToMinutes(a.startTime), bs = timeToMinutes(b.startTime);
+    if (as !== bs) return as - bs;
+    return timeToMinutes(b.endTime) - timeToMinutes(a.endTime);
+  });
+
+  const result = [];
+  let cluster = [];
+  let clusterEnd = -Infinity;
+
+  const flush = () => {
+    if (!cluster.length) return;
+    const colEnds = [];
+    const placed = [];
+    for (const item of cluster) {
+      let col = colEnds.findIndex((endTime) => item.s >= endTime);
+      if (col === -1) { col = colEnds.length; colEnds.push(item.e); }
+      else colEnds[col] = item.e;
+      placed.push({ ...item, col });
+    }
+    const totalCols = colEnds.length;
+    for (const p of placed) result.push({ ...p, totalCols });
+    cluster = [];
+  };
+
+  for (const ev of sorted) {
+    const s = timeToMinutes(ev.startTime);
+    const e = Math.max(timeToMinutes(ev.endTime), s + 15);
+    if (cluster.length === 0) { cluster.push({ ev, s, e }); clusterEnd = e; continue; }
+    if (s < clusterEnd) { cluster.push({ ev, s, e }); clusterEnd = Math.max(clusterEnd, e); }
+    else { flush(); cluster = [{ ev, s, e }]; clusterEnd = e; }
+  }
+  flush();
+  return result;
+}
+
+function WeekView({ cursorDate, eventsByDate, selectedDate, onSelectDay, onEventClick }) {
+  const width = useViewportWidth();
+  const isTablet = width >= 700; // roughly a Tab S10 FE or bigger, in either orientation
+  const TIME_COL_W = isTablet ? 46 : 32;
   const start = startOfWeek(cursorDate);
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
   const tKey = todayKey();
+
+  const dayLayouts = days.map((d) => {
+    const k = keyOf(d);
+    return { k, d, layout: layoutDayEvents(eventsByDate[k] || []) };
+  });
+
+  /* Adaptive hour range: shows the whole day only if it has events outside
+     the usual 6h–22h window, so the grid stays compact by default instead
+     of always rendering 24 empty hours. */
+  let minH = 6, maxH = 22;
+  for (const { layout } of dayLayouts) {
+    for (const { s, e } of layout) {
+      minH = Math.min(minH, Math.floor(s / 60));
+      maxH = Math.max(maxH, Math.ceil(e / 60));
+    }
+  }
+  minH = Math.max(0, minH);
+  maxH = Math.min(24, maxH);
+  const hourCount = maxH - minH;
+  const HOUR_H = isTablet
+    ? (hourCount <= 16 ? 56 : hourCount <= 20 ? 46 : 38)
+    : (hourCount <= 16 ? 34 : hourCount <= 20 ? 28 : 22);
+  const hours = Array.from({ length: hourCount }, (_, i) => minH + i);
+  const gridCols = `${TIME_COL_W}px repeat(7, minmax(0,1fr))`;
+  const titleSize = isTablet ? "text-xs" : "text-[8px]";
+  const timeSize = isTablet ? "text-[10px]" : "text-[7px]";
+  const hourLabelSize = isTablet ? "text-[11px]" : "text-[8px]";
+
   return (
-    <div className="px-3 pt-3 flex flex-col gap-2">
-      {days.map((d) => {
-        const k = keyOf(d);
-        const dayEvents = eventsByDate[k] || [];
-        const isToday = k === tKey;
-        return (
-          <button key={k} onClick={() => onSelectDay(k)}
-            className={`w-full text-left rounded-2xl px-4 py-3 flex items-center gap-3 transition-colors ${isLight ? "bg-neutral-50 hover:bg-neutral-100" : "bg-neutral-800/60 hover:bg-neutral-800"}`}>
-            <div className="flex flex-col items-center w-10 shrink-0">
-              <span className={`text-[10px] uppercase ${isLight ? "text-neutral-400" : "text-neutral-500"}`}>{WEEKDAY_LABELS[d.getDay()]}</span>
-              <span className={`text-lg font-semibold leading-none mt-0.5 ${isToday ? "text-violet-400" : ""}`} style={{ fontFamily: "'Fraunces', serif" }}>{d.getDate()}</span>
+    <div className="px-3 pt-2">
+      <div className="relative">
+        {/* Sticky header: weekday + date per column */}
+        <div className="sticky top-0 z-20 grid bg-neutral-900/95 backdrop-blur border-b border-neutral-800"
+          style={{ gridTemplateColumns: gridCols }}>
+          <div />
+          {dayLayouts.map(({ k, d }) => {
+            const isToday = k === tKey;
+            return (
+              <button key={k} onClick={() => onSelectDay(k)}
+                className="flex flex-col items-center justify-center gap-1 py-1.5 border-l border-neutral-800/60 min-w-0">
+                <span className={`${isTablet ? "text-xs" : "text-[9px]"} uppercase tracking-wide text-neutral-500`}>{WEEKDAY_LABELS[d.getDay()]}</span>
+                <span
+                  className={`${isTablet ? "text-base w-8 h-8" : "text-xs w-6 h-6"} font-semibold flex items-center justify-center rounded-full ${
+                    isToday ? "bg-violet-600 text-white" : "text-neutral-200"
+                  }`}
+                  style={{ fontFamily: "'Fraunces', serif" }}
+                >
+                  {d.getDate()}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Grid body */}
+        <div className="relative" style={{ height: hourCount * HOUR_H }}>
+          {/* full-width hour separator lines, independent of column widths */}
+          {hours.map((h) => (
+            <div key={h} className="absolute left-0 right-0 border-t border-neutral-800/70"
+              style={{ top: (h - minH) * HOUR_H }} />
+          ))}
+
+          <div className="grid h-full" style={{ gridTemplateColumns: gridCols }}>
+            <div className="relative">
+              {hours.map((h) => (
+                <span key={h} className={`absolute right-1 ${hourLabelSize} text-neutral-500 -translate-y-1/2`}
+                  style={{ top: (h - minH) * HOUR_H }}>
+                  {pad2(h)}h
+                </span>
+              ))}
             </div>
-            <div className="flex-1 min-w-0">
-              {dayEvents.length === 0 ? (
-                <span className="text-xs text-neutral-500">Sem compromissos</span>
-              ) : (
-                <div className="flex flex-col gap-1">
-                  {dayEvents.slice(0, 3).map((ev) => (
-                    <div key={ev.id} className="flex items-center gap-2 text-xs">
-                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${colorOf(ev.color).dot}`} />
-                      <span className={`truncate ${isLight ? "text-neutral-600" : "text-neutral-300"}`}>{ev.title}</span>
-                      <span className="text-neutral-500 shrink-0">{formatHM(ev.startTime)}</span>
-                    </div>
-                  ))}
-                  {dayEvents.length > 3 && <span className="text-[11px] text-neutral-500">+{dayEvents.length - 3} mais</span>}
-                </div>
-              )}
-            </div>
-          </button>
-        );
-      })}
+
+            {dayLayouts.map(({ k, layout }) => (
+              <div key={k} className="relative border-l border-neutral-800/40 min-w-0">
+                {layout.map(({ ev, s, e, col, totalCols }) => {
+                  const c = colorOf(ev.color);
+                  const top = ((s / 60) - minH) * HOUR_H;
+                  const height = Math.max((((e - s) / 60)) * HOUR_H - 2, isTablet ? 24 : 18);
+                  const widthPct = 100 / totalCols;
+                  return (
+                    <button key={ev.id} onClick={() => onEventClick(ev)}
+                      className={`absolute rounded-md text-left overflow-hidden border-l-2 ${isTablet ? "px-2 py-1" : "px-1 py-0.5"} ${c.soft}`}
+                      style={{
+                        top, height,
+                        left: `${col * widthPct}%`,
+                        width: `calc(${widthPct}% - ${isTablet ? 4 : 2}px)`,
+                        borderLeftColor: c.hex,
+                      }}>
+                      <p className={`${titleSize} font-medium leading-tight truncate`} style={{ color: c.hex }}>{ev.title}</p>
+                      {height > (isTablet ? 34 : 26) && (
+                        <p className={`${timeSize} text-neutral-500 leading-tight truncate`}>{formatHM(ev.startTime)}</p>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

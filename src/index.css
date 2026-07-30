@@ -3,3 +3,35 @@
 @tailwind utilities;
 
 html, body, #root { height: 100%; margin: 0; }
+
+* { font-family: 'Inter', system-ui, sans-serif; }
+
+html {
+  /* Stops the page from rubber-banding/bouncing like a website; feels
+     like a native app instead. */
+  overscroll-behavior: none;
+}
+
+body {
+  /* Removes the gray flash Android/Chrome shows on every tap. */
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  /* Buttons shouldn't let text get selected on long-press like a webpage. */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input, textarea, select {
+  /* iOS Safari auto-zooms into any input with a font-size under 16px;
+     this keeps the calendar from "jumping" every time a field is tapped. */
+  font-size: 16px;
+}
+
+::-webkit-scrollbar { width: 0; height: 0; }
+
+@keyframes slideUp {
+  from { transform: translateY(24px); opacity: .6; }
+  to { transform: translateY(0); opacity: 1; }
+}

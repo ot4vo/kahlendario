@@ -1,11 +1,11 @@
 {
   "name": "Kahlendario",
   "short_name": "Kahlendario",
-  "description": "App de calendário mobile-first, tema escuro, com repetição inteligente de eventos, busca, filtros, estatísticas e backup.",
+  "description": "App de calendário mobile-first, tema escuro, com repetição inteligente de eventos, busca, filtros, categorias e importação/exportação.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "orientation": "portrait",
+  "orientation": "any",
   "background_color": "#171717",
   "theme_color": "#171717",
   "lang": "pt-BR",

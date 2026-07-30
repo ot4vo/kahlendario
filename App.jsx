@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
   ChevronLeft, ChevronRight, Plus, Search, SlidersHorizontal, X, Clock,
-  MapPin, Bell, Repeat, Copy, Trash2, Pencil, Check, BarChart3,
-  Download, Upload, Menu, ChevronDown, CalendarDays, ArrowLeft, Palette
+  MapPin, Bell, Repeat, Copy, Trash2, Pencil, Check,
+  Download, Upload, Menu, ChevronDown, ChevronUp, CalendarDays, ArrowLeft, Palette
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -360,18 +360,19 @@ function EventForm({ initial, categories, onCancel, onSave }) {
 /* Event chip / row                                                   */
 /* ------------------------------------------------------------------ */
 
-function EventRow({ ev, category, onClick }) {
+function EventRow({ ev, category, onClick, onMoveUp, onMoveDown }) {
   const c = colorOf(ev.color);
+  const canReorder = onMoveUp || onMoveDown;
   return (
-    <button onClick={onClick} className="w-full flex items-stretch gap-3 text-left group">
+    <div className="w-full flex items-stretch gap-3 group">
       <div className="flex flex-col items-center pt-0.5 w-12 shrink-0">
         <span className="text-xs font-medium text-neutral-300">{formatHM(ev.startTime)}</span>
         <span className="text-[10px] text-neutral-500">{formatHM(ev.endTime)}</span>
       </div>
       <div className={`w-1 rounded-full ${c.dot} shrink-0`} />
-      <div className="flex-1 bg-neutral-700/50 group-active:bg-neutral-700 rounded-2xl px-4 py-3 mb-2 transition-colors min-w-0">
+      <button onClick={onClick} className="flex-1 text-left bg-neutral-700/50 active:bg-neutral-700 rounded-2xl px-4 py-3 mb-2 transition-colors min-w-0">
         <div className="flex items-center gap-2">
-          <p className="text-neutral-100 font-medium truncate">{ev.title}</p>
+          <p className="text-neutral-100 font-medium break-words">{ev.title}</p>
           {ev.repeat?.type && ev.repeat.type !== "none" && <Repeat size={12} className="text-neutral-500 shrink-0" />}
         </div>
         {ev.location && (
@@ -381,8 +382,20 @@ function EventRow({ ev, category, onClick }) {
         {category && (
           <span className={`inline-block mt-2 text-[10px] px-2 py-0.5 rounded-full ${c.soft} ${c.text}`}>{category.name}</span>
         )}
-      </div>
-    </button>
+      </button>
+      {canReorder && (
+        <div className="flex flex-col justify-center gap-1 shrink-0 mb-2">
+          <button aria-label="Mover para cima" onClick={onMoveUp} disabled={!onMoveUp}
+            className="w-7 h-7 flex items-center justify-center rounded-full text-neutral-500 hover:text-neutral-200 hover:bg-neutral-700 disabled:opacity-25 disabled:hover:bg-transparent transition-colors">
+            <ChevronUp size={16} />
+          </button>
+          <button aria-label="Mover para baixo" onClick={onMoveDown} disabled={!onMoveDown}
+            className="w-7 h-7 flex items-center justify-center rounded-full text-neutral-500 hover:text-neutral-200 hover:bg-neutral-700 disabled:opacity-25 disabled:hover:bg-transparent transition-colors">
+            <ChevronDown size={16} />
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -395,7 +408,7 @@ export default function CalendarApp() {
   const [events, setEvents] = useState([]);
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
 
-  const [view, setView] = useState("month"); // month | week | day
+  const [view, setView] = useState("week"); // month | week | day
   const [cursorDate, setCursorDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(todayKey());
 
@@ -414,14 +427,12 @@ export default function CalendarApp() {
   const [activeCats, setActiveCats] = useState([]);
 
   const [menuOpen, setMenuOpen] = useState(false);
-  const [statsOpen, setStatsOpen] = useState(false);
   const [categoriesOpen, setCategoriesOpen] = useState(false);
   const [newCatName, setNewCatName] = useState("");
   const [newCatColor, setNewCatColor] = useState("blue");
   const [bulkColorOpen, setBulkColorOpen] = useState(false);
   const [bulkGroupKey, setBulkGroupKey] = useState(null);
   const [toast, setToast] = useState("");
-  const fileInputRef = useRef(null);
   const csvInputRef = useRef(null);
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2200); };
@@ -443,11 +454,16 @@ export default function CalendarApp() {
 
   const isLight = false; // Kahlendario é sempre no tema escuro
 
+  /* Sorts a day's events by manual order (if the user has reordered them),
+     falling back to start time for events that haven't been reordered. */
+  const sortDay = (list) =>
+    list.sort((a, b) => (a.order ?? timeToMinutes(a.startTime)) - (b.order ?? timeToMinutes(b.startTime)));
+
   /* ---- derived ---- */
   const eventsByDate = useMemo(() => {
     const map = {};
     for (const ev of events) { (map[ev.date] = map[ev.date] || []).push(ev); }
-    for (const k in map) map[k].sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+    for (const k in map) sortDay(map[k]);
     return map;
   }, [events]);
 
@@ -491,7 +507,7 @@ export default function CalendarApp() {
   const filteredByDate = useMemo(() => {
     const map = {};
     for (const ev of filteredEvents) { (map[ev.date] = map[ev.date] || []).push(ev); }
-    for (const k in map) map[k].sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
+    for (const k in map) sortDay(map[k]);
     return map;
   }, [filteredEvents]);
 
@@ -535,6 +551,19 @@ export default function CalendarApp() {
     showToast(wholeSeries ? "Série excluída" : "Evento excluído");
   };
 
+  /* Moves an event up/down within its day's list, independent of its start
+     time. Reassigns a manual "order" to every event of that day so the new
+     sequence sticks even though the times themselves never change. */
+  const moveEventInDay = (dateKey, id, direction) => {
+    const list = (eventsByDate[dateKey] || []).slice();
+    const idx = list.findIndex((e) => e.id === id);
+    const swapWith = idx + direction;
+    if (idx === -1 || swapWith < 0 || swapWith >= list.length) return;
+    [list[idx], list[swapWith]] = [list[swapWith], list[idx]];
+    const orderById = Object.fromEntries(list.map((e, i) => [e.id, i]));
+    setEvents((prev) => prev.map((e) => (e.id in orderById ? { ...e, order: orderById[e.id] } : e)));
+  };
+
   const duplicateEvent = (ev) => {
     setEvents((prev) => [...prev, { ...ev, id: uid(), seriesId: null, title: ev.title + " (cópia)" }]);
     setDetailEvent(null);
@@ -557,19 +586,6 @@ export default function CalendarApp() {
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
     showToast("Backup exportado");
-  };
-
-  const importJSON = (file) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const parsed = JSON.parse(reader.result);
-        if (Array.isArray(parsed.events)) setEvents(parsed.events);
-        if (Array.isArray(parsed.categories)) setCategories(parsed.categories);
-        showToast("Backup importado");
-      } catch (e) { showToast("Arquivo inválido"); }
-    };
-    reader.readAsText(file);
   };
 
   /* Parses CSV text into an array of row-arrays, respecting quoted fields
@@ -689,27 +705,6 @@ export default function CalendarApp() {
     touchRef.current = null;
   };
 
-  /* ------------------------------------------------------------------ */
-  /* Stats                                                                */
-  /* ------------------------------------------------------------------ */
-  const statsData = useMemo(() => {
-    const now = new Date();
-    const weekStart = startOfWeek(now), weekEnd = addDays(weekStart, 6);
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    const countIn = (start, end) => {
-      const counts = {};
-      for (const ev of events) {
-        const d = parseKey(ev.date);
-        if (d >= start && d <= end) {
-          const key = ev.categoryId || "sem-categoria";
-          counts[key] = (counts[key] || 0) + 1;
-        }
-      }
-      return counts;
-    };
-    return { week: countIn(weekStart, weekEnd), month: countIn(monthStart, monthEnd) };
-  }, [events]);
 
   if (!loaded) {
     return (
@@ -816,8 +811,10 @@ export default function CalendarApp() {
             {((hasFilters || query ? filteredByDate : eventsByDate)[selectedDate] || []).length === 0 && (
               <div className="py-6 text-center text-neutral-500 text-sm">Nenhum compromisso neste dia.</div>
             )}
-            {((hasFilters || query ? filteredByDate : eventsByDate)[selectedDate] || []).map((ev) => (
-              <EventRow key={ev.id} ev={ev} category={categoryById[ev.categoryId]} onClick={() => setDetailEvent(ev)} />
+            {((hasFilters || query ? filteredByDate : eventsByDate)[selectedDate] || []).map((ev, i, list) => (
+              <EventRow key={ev.id} ev={ev} category={categoryById[ev.categoryId]} onClick={() => setDetailEvent(ev)}
+                onMoveUp={!hasFilters && !query && i > 0 ? () => moveEventInDay(selectedDate, ev.id, -1) : null}
+                onMoveDown={!hasFilters && !query && i < list.length - 1 ? () => moveEventInDay(selectedDate, ev.id, 1) : null} />
             ))}
             <button onClick={() => openCreateForm(selectedDate)}
               className="mt-1 flex items-center justify-center gap-2 py-3 rounded-2xl border border-dashed border-neutral-600 text-neutral-400 text-sm">
@@ -972,11 +969,6 @@ export default function CalendarApp() {
           </div>
         </Sheet>
 
-        {/* Stats */}
-        <Sheet open={statsOpen} onClose={() => setStatsOpen(false)} title="Estatísticas">
-          <StatsPanel data={statsData} categories={categories} categoryById={categoryById} />
-        </Sheet>
-
         {/* Menu */}
         <Sheet open={menuOpen} onClose={() => setMenuOpen(false)} title="Menu">
           <div className="flex flex-col gap-1 pt-1">
@@ -986,17 +978,9 @@ export default function CalendarApp() {
             <button onClick={() => { setBulkGroupKey(null); setBulkColorOpen(true); setMenuOpen(false); }} className="flex items-center gap-3 px-2 py-3 text-sm">
               <Palette size={17} /> Mudar cor em massa
             </button>
-            <button onClick={() => { setStatsOpen(true); setMenuOpen(false); }} className="flex items-center gap-3 px-2 py-3 text-sm">
-              <BarChart3 size={17} /> Estatísticas
-            </button>
             <button onClick={exportJSON} className="flex items-center gap-3 px-2 py-3 text-sm">
               <Download size={17} /> Exportar backup (JSON)
             </button>
-            <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-3 px-2 py-3 text-sm">
-              <Upload size={17} /> Importar backup (JSON)
-            </button>
-            <input ref={fileInputRef} type="file" accept="application/json" className="hidden"
-              onChange={(e) => { if (e.target.files[0]) importJSON(e.target.files[0]); e.target.value = ""; setMenuOpen(false); }} />
             <button onClick={() => csvInputRef.current?.click()} className="flex items-center gap-3 px-2 py-3 text-sm">
               <Upload size={17} /> Importar eventos (CSV)
             </button>
@@ -1140,7 +1124,7 @@ function MonthView({ cursorDate, eventsByDate, selectedDate, isLight, onSelectDa
                       return (
                         <span key={ev.id}
                           title={ev.title}
-                          className={`text-[9px] leading-[11px] font-medium px-1 py-[1px] rounded w-full text-left whitespace-normal break-words line-clamp-2 ${
+                          className={`text-[9px] leading-tight font-medium px-1 py-[1px] rounded truncate w-full text-left ${
                             isSelected ? "bg-white/25 text-white" : `${c.soft} ${c.text}`
                           }`}>
                           {ev.title}
@@ -1245,45 +1229,3 @@ function DayView({ dateKey, events, isLight, categoryById, onEventClick, onSlotC
     </div>
   );
 }
-
-/* ------------------------------------------------------------------ */
-/* Stats panel                                                          */
-/* ------------------------------------------------------------------ */
-
-function StatsPanel({ data, categories, categoryById }) {
-  const renderBars = (counts) => {
-    const entries = Object.entries(counts);
-    const max = Math.max(1, ...entries.map(([, v]) => v));
-    if (entries.length === 0) return <p className="text-sm text-neutral-500">Nenhum evento neste período.</p>;
-    return (
-      <div className="flex flex-col gap-2.5">
-        {entries.sort((a, b) => b[1] - a[1]).map(([catId, count]) => {
-          const cat = categoryById[catId];
-          const c = colorOf(cat?.color || "gray");
-          return (
-            <div key={catId} className="flex items-center gap-3">
-              <span className="text-xs w-20 truncate text-neutral-400">{cat ? cat.name : "Sem categoria"}</span>
-              <div className="flex-1 h-2.5 rounded-full bg-neutral-700 overflow-hidden">
-                <div className={`h-full ${c.dot}`} style={{ width: `${(count / max) * 100}%` }} />
-              </div>
-              <span className="text-xs text-neutral-400 w-4 text-right">{count}</span>
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
-
-  return (
-    <div className="flex flex-col gap-6 pt-1">
-      <div>
-        <h3 className="text-sm font-medium text-neutral-300 mb-3">Esta semana</h3>
-        {renderBars(data.week)}
-      </div>
-      <div>
-        <h3 className="text-sm font-medium text-neutral-300 mb-3">Este mês</h3>
-        {renderBars(data.month)}
-      </div>
-    </div>
-  );
-} 
