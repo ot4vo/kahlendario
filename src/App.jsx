@@ -38,6 +38,7 @@ const DEFAULT_CATEGORIES = [
   { id: "financeiro", name: "Financeiro", color: "green" },
   { id: "pessoal",    name: "Pessoal",    color: "pink" },
   { id: "lazer",      name: "Lazer",      color: "yellow" },
+  { id: "otavio",     name: "Otavio",     color: "red" },
 ];
 
 const REMINDERS = [
@@ -206,6 +207,55 @@ function Sheet({ open, onClose, children, title, maxHeight = "85vh" }) {
         )}
         <div className="overflow-y-auto px-5 pb-8">{children}</div>
       </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Heart explosion (fun easter egg for the "Otavio" category)         */
+/* ------------------------------------------------------------------ */
+
+const HEART_EMOJIS = ["💗", "💕", "💖", "💓", "❤️", "💘"];
+
+function HeartExplosion({ burstKey }) {
+  const hearts = useMemo(() => {
+    if (!burstKey) return [];
+    const count = 26;
+    return Array.from({ length: count }, (_, i) => {
+      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.5;
+      const distance = 80 + Math.random() * 160;
+      return {
+        id: `${burstKey}-${i}`,
+        tx: Math.cos(angle) * distance,
+        ty: Math.sin(angle) * distance,
+        size: 16 + Math.random() * 20,
+        delay: Math.random() * 0.12,
+        duration: 0.9 + Math.random() * 0.6,
+        rotate: (Math.random() - 0.5) * 240,
+        emoji: HEART_EMOJIS[Math.floor(Math.random() * HEART_EMOJIS.length)],
+      };
+    });
+  }, [burstKey]);
+
+  if (!burstKey || hearts.length === 0) return null;
+
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[80] flex items-center justify-center overflow-hidden">
+      {hearts.map((h) => (
+        <span
+          key={h.id}
+          className="absolute select-none"
+          style={{
+            fontSize: h.size,
+            animation: `heartBurst ${h.duration}s ease-out ${h.delay}s forwards`,
+            "--tx": `${h.tx}px`,
+            "--ty": `${h.ty}px`,
+            "--rot": `${h.rotate}deg`,
+          }}
+        >
+          {h.emoji}
+        </span>
+      ))}
     </div>
   );
 }
@@ -416,6 +466,8 @@ export default function CalendarApp() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [activeColors, setActiveColors] = useState([]);
   const [activeCats, setActiveCats] = useState([]);
+  const [heartBurstKey, setHeartBurstKey] = useState(0);
+  const triggerHeartBurst = () => setHeartBurstKey((k) => k + 1);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [categoriesOpen, setCategoriesOpen] = useState(false);
@@ -435,8 +487,13 @@ export default function CalendarApp() {
         loadStorage("calendar:events", []),
         loadStorage("calendar:categories", DEFAULT_CATEGORIES),
       ]);
+      // Garante que categorias padrão novas (ex: "Otavio") apareçam mesmo
+      // para quem já tinha categorias salvas de uma versão anterior.
+      const existingIds = new Set(cats.map((c) => c.id));
+      const missingDefaults = DEFAULT_CATEGORIES.filter((c) => !existingIds.has(c.id));
+      const mergedCats = missingDefaults.length ? [...cats, ...missingDefaults] : cats;
       setEvents(ev);
-      setCategories(cats);
+      setCategories(mergedCats);
       setLoaded(true);
     })();
   }, []);
@@ -711,6 +768,8 @@ export default function CalendarApp() {
     <div className={`h-[100dvh] w-full flex justify-center overflow-hidden ${isLight ? "bg-neutral-100" : "bg-neutral-900"}`}>
       <div className={`w-full max-w-md md:max-w-2xl lg:max-w-3xl h-[100dvh] flex flex-col relative overflow-hidden ${isLight ? "bg-white text-neutral-800" : "bg-neutral-900 text-neutral-100"}`}>
 
+        <HeartExplosion burstKey={heartBurstKey} />
+
         {/* Header */}
         <div className={`sticky top-0 z-30 backdrop-blur-md ${isLight ? "bg-white/90 border-neutral-200" : "bg-neutral-900/90 border-neutral-800"} border-b px-4 pt-4 pb-3`}>
           <div className="flex items-center justify-between mb-3">
@@ -943,7 +1002,10 @@ export default function CalendarApp() {
                   const cc = colorOf(cat.color);
                   const on = activeCats.includes(cat.id);
                   return (
-                    <button key={cat.id} onClick={() => setActiveCats((a) => on ? a.filter(x => x !== cat.id) : [...a, cat.id])}
+                    <button key={cat.id} onClick={() => {
+                      setActiveCats((a) => on ? a.filter(x => x !== cat.id) : [...a, cat.id]);
+                      if (cat.id === "otavio") triggerHeartBurst();
+                    }}
                       className={`px-3 py-1.5 rounded-full text-sm border flex items-center gap-1.5 ${on ? `border-transparent ${cc.soft} ${cc.text}` : "border-neutral-600 text-neutral-400"}`}>
                       <span className={`w-2 h-2 rounded-full ${cc.dot}`} />{cat.name}
                     </button>

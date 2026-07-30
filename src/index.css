@@ -35,3 +35,18 @@ input, textarea, select {
   from { transform: translateY(24px); opacity: .6; }
   to { transform: translateY(0); opacity: 1; }
 }
+
+@keyframes heartBurst {
+  0% {
+    transform: translate(0, 0) scale(0.3) rotate(0deg);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+    transform: translate(calc(var(--tx) * 0.3), calc(var(--ty) * 0.3)) scale(1.2) rotate(calc(var(--rot) * 0.3));
+  }
+  100% {
+    transform: translate(var(--tx), calc(var(--ty) - 50px)) scale(0.6) rotate(var(--rot));
+    opacity: 0;
+  }
+}
