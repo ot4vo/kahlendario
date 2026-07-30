@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
   ChevronLeft, ChevronRight, Plus, Search, SlidersHorizontal, X, Clock,
-  MapPin, Bell, Repeat, Copy, Trash2, Pencil, Check,
-  Download, Upload, Menu, ChevronDown, ChevronUp, CalendarDays, ArrowLeft, Palette
+  MapPin, Repeat, Copy, Trash2, Pencil, Check,
+  Download, Upload, Menu, ChevronDown, ChevronUp, CalendarDays, ArrowLeft, Palette, LogOut
 } from "lucide-react";
+import LoginScreen from "./LoginScreen.jsx";
+import { loadUserData, saveUserData } from "./lib/cloudStore.js";
 
 /* ------------------------------------------------------------------ */
 /* Constants                                                          */
@@ -31,25 +33,14 @@ const COLORS = [
 const colorOf = (key) => COLORS.find((c) => c.key === key) || COLORS[8];
 
 const DEFAULT_CATEGORIES = [
-  { id: "trabalho",   name: "Trabalho",   color: "blue" },
-  { id: "faculdade",  name: "Faculdade",  color: "purple" },
-  { id: "academia",   name: "Academia",   color: "orange" },
-  { id: "consulta",   name: "Consulta",   color: "cyan" },
-  { id: "financeiro", name: "Financeiro", color: "green" },
-  { id: "pessoal",    name: "Pessoal",    color: "pink" },
-  { id: "lazer",      name: "Lazer",      color: "yellow" },
-  { id: "otavio",     name: "Otavio",     color: "red" },
+  { id: "otavio", name: "Otavio", color: "red" },
 ];
 
-const REMINDERS = [
-  { value: -1,  label: "Sem lembrete" },
-  { value: 5,   label: "5 minutos antes" },
-  { value: 10,  label: "10 minutos antes" },
-  { value: 30,  label: "30 minutos antes" },
-  { value: 60,  label: "1 hora antes" },
-  { value: 120, label: "2 horas antes" },
-  { value: 1440,label: "1 dia antes" },
-];
+/* Categorias deixaram de ser fixas: a única padrão é "Otavio". As demais
+   nascem sozinhas quando o usuário cria vários eventos com o mesmo nome
+   (ver AUTO_CATEGORY_THRESHOLD mais abaixo, perto do componente App). */
+
+const AUTO_CATEGORY_THRESHOLD = 5; // mais de 5 eventos com o mesmo nome → vira categoria
 
 const WEEKDAY_LABELS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const WEEKDAY_FULL = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
@@ -141,21 +132,6 @@ function generateDates(baseDateKey, repeat) {
 }
 
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
-
-/* ------------------------------------------------------------------ */
-/* Persistence (browser localStorage)                                 */
-/* ------------------------------------------------------------------ */
-
-async function loadStorage(key, fallback) {
-  try {
-    const raw = window.localStorage.getItem(key);
-    if (raw) return JSON.parse(raw);
-  } catch (e) { /* key missing or storage unavailable */ }
-  return fallback;
-}
-async function saveStorage(key, value) {
-  try { window.localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* ignore */ }
-}
 
 /* ------------------------------------------------------------------ */
 /* Small UI atoms                                                     */
@@ -273,7 +249,6 @@ function EventForm({ initial, categories, onCancel, onSave }) {
   const [endTime, setEndTime] = useState(initial.endTime || "10:00");
   const [color, setColor] = useState(initial.color || "blue");
   const [categoryId, setCategoryId] = useState(initial.categoryId || "");
-  const [reminder, setReminder] = useState(initial.reminder ?? -1);
   const [repeatType, setRepeatType] = useState(initial.repeat?.type || "none");
   const [customDays, setCustomDays] = useState(initial.repeat?.days || []);
   const [repeatOpen, setRepeatOpen] = useState(false);
@@ -293,7 +268,6 @@ function EventForm({ initial, categories, onCancel, onSave }) {
       endTime,
       color,
       categoryId: categoryId || null,
-      reminder,
       repeat: { type: repeatType, days: repeatType === "custom" ? customDays : [] },
     });
   };
@@ -346,14 +320,6 @@ function EventForm({ initial, categories, onCancel, onSave }) {
           ))}
         </div>
       </div>
-
-      <label className="flex items-center gap-3 bg-neutral-700/60 rounded-2xl px-4 py-3">
-        <Bell size={18} className="text-neutral-500 shrink-0" />
-        <select value={reminder} onChange={(e) => setReminder(Number(e.target.value))}
-          className="bg-transparent text-neutral-100 outline-none w-full">
-          {REMINDERS.map((r) => <option key={r.value} value={r.value} className="bg-neutral-800">{r.label}</option>)}
-        </select>
-      </label>
 
       <div className="bg-neutral-700/60 rounded-2xl overflow-hidden">
         <button onClick={() => setRepeatOpen((o) => !o)} className="w-full flex items-center gap-3 px-4 py-3">
@@ -444,7 +410,7 @@ function EventRow({ ev, category, onClick, onMoveUp, onMoveDown }) {
 /* Main App                                                            */
 /* ------------------------------------------------------------------ */
 
-export default function CalendarApp() {
+function CalendarApp({ userName, onSwitchUser }) {
   const [loaded, setLoaded] = useState(false);
   const [events, setEvents] = useState([]);
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
@@ -480,25 +446,92 @@ export default function CalendarApp() {
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(""), 2200); };
 
-  /* ---- load / save ---- */
+  /* ---- load / save (Supabase, isolado por usuário) ---- */
   useEffect(() => {
+    let cancelled = false;
+    setLoaded(false);
     (async () => {
-      const [ev, cats] = await Promise.all([
-        loadStorage("calendar:events", []),
-        loadStorage("calendar:categories", DEFAULT_CATEGORIES),
-      ]);
+      const remote = await loadUserData(userName);
+      const ev = remote?.events ?? [];
+      const cats = remote?.categories ?? DEFAULT_CATEGORIES;
       // Garante que categorias padrão novas (ex: "Otavio") apareçam mesmo
       // para quem já tinha categorias salvas de uma versão anterior.
       const existingIds = new Set(cats.map((c) => c.id));
       const missingDefaults = DEFAULT_CATEGORIES.filter((c) => !existingIds.has(c.id));
       const mergedCats = missingDefaults.length ? [...cats, ...missingDefaults] : cats;
+      if (cancelled) return;
       setEvents(ev);
       setCategories(mergedCats);
       setLoaded(true);
     })();
-  }, []);
-  useEffect(() => { if (loaded) saveStorage("calendar:events", events); }, [events, loaded]);
-  useEffect(() => { if (loaded) saveStorage("calendar:categories", categories); }, [categories, loaded]);
+    return () => { cancelled = true; };
+  }, [userName]);
+
+  // Salva no Supabase com um pequeno debounce, para não disparar uma
+  // requisição a cada tecla digitada. Também grava um cache local, então
+  // uma falha de rede momentânea não perde a alteração.
+  const saveTimer = useRef(null);
+  useEffect(() => {
+    if (!loaded) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      saveUserData(userName, { events, categories });
+    }, 600);
+    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
+  }, [events, categories, loaded, userName]);
+
+  /* Categorias automáticas: quando o usuário tem mais de
+     AUTO_CATEGORY_THRESHOLD eventos com o mesmo título, uma categoria com
+     esse nome nasce sozinha (aparece em Filtros) e é aplicada nos eventos
+     que ainda não tinham categoria nenhuma. */
+  useEffect(() => {
+    if (!loaded) return;
+    const norm = (s) => s.trim().toLowerCase();
+    const slugify = (s) =>
+      norm(s)
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || `cat-${uid()}`;
+
+    const counts = new Map(); // título normalizado -> { count, sample }
+    for (const ev of events) {
+      if (!ev.title || !ev.title.trim()) continue;
+      const key = norm(ev.title);
+      const entry = counts.get(key) || { count: 0, sample: ev.title.trim() };
+      entry.count += 1;
+      counts.set(key, entry);
+    }
+
+    const existingNames = new Set(categories.map((c) => norm(c.name)));
+    const newCats = [];
+    let colorCursor = categories.length;
+    for (const [key, { count, sample }] of counts) {
+      if (count > AUTO_CATEGORY_THRESHOLD && !existingNames.has(key)) {
+        let id = slugify(sample);
+        if (categories.some((c) => c.id === id) || newCats.some((c) => c.id === id)) {
+          id = `${id}-${uid().slice(0, 4)}`;
+        }
+        const color = COLORS[colorCursor % COLORS.length].key;
+        colorCursor++;
+        newCats.push({ id, name: sample, color });
+      }
+    }
+
+    if (newCats.length > 0) {
+      const idByName = new Map(newCats.map((c) => [norm(c.name), c.id]));
+      setCategories((prev) => [...prev, ...newCats]);
+      setEvents((prev) => prev.map((ev) => {
+        const key = ev.title ? norm(ev.title) : null;
+        if (!ev.categoryId && key && idByName.has(key)) {
+          return { ...ev, categoryId: idByName.get(key) };
+        }
+        return ev;
+      }));
+      showToast(newCats.length === 1
+        ? `Categoria "${newCats[0].name}" criada automaticamente`
+        : `${newCats.length} categorias criadas automaticamente`);
+    }
+  }, [events, categories, loaded]);
 
   const isLight = false; // Kahlendario é sempre no tema escuro
 
@@ -695,7 +728,6 @@ export default function CalendarApp() {
             endTime: isAllDay ? "" : `${pad2(end.getHours())}:${pad2(end.getMinutes())}`,
             color: c.key,
             categoryId: null,
-            reminder: -1,
             repeat: { type: "none", days: [] },
             seriesId: null,
           });
@@ -902,9 +934,6 @@ export default function CalendarApp() {
                   {categoryById[detailEvent.categoryId].name}
                 </span>
               )}
-              {detailEvent.reminder != null && detailEvent.reminder >= 0 && (
-                <p className="text-xs text-neutral-500 flex items-center gap-2"><Bell size={13} />{REMINDERS.find(r => r.value === detailEvent.reminder)?.label}</p>
-              )}
               {detailEvent.seriesId && (
                 <p className="text-xs text-neutral-500 flex items-center gap-2"><Repeat size={13} />Parte de uma série recorrente</p>
               )}
@@ -1034,7 +1063,11 @@ export default function CalendarApp() {
             </button>
             <input ref={csvInputRef} type="file" accept=".csv,text/csv" className="hidden"
               onChange={(e) => { if (e.target.files[0]) importCSV(e.target.files[0]); e.target.value = ""; setMenuOpen(false); }} />
-            <p className="text-xs text-neutral-500 px-2 pt-3">Seus dados ficam salvos automaticamente neste dispositivo.</p>
+            <div className="h-px bg-neutral-800 my-1" />
+            <button onClick={() => { setMenuOpen(false); onSwitchUser?.(); }} className="flex items-center gap-3 px-2 py-3 text-sm text-rose-400">
+              <LogOut size={17} /> Trocar usuário
+            </button>
+            <p className="text-xs text-neutral-500 px-2 pt-3">Logado como <span className="text-neutral-300">{userName}</span> · dados sincronizados na nuvem.</p>
           </div>
         </Sheet>
 
@@ -1255,18 +1288,10 @@ function WeekView({ cursorDate, eventsByDate, selectedDate, onSelectDay, onEvent
     return { k, d, layout: layoutDayEvents(eventsByDate[k] || []) };
   });
 
-  /* Adaptive hour range: shows the whole day only if it has events outside
-     the usual 6h–22h window, so the grid stays compact by default instead
-     of always rendering 24 empty hours. */
-  let minH = 6, maxH = 22;
-  for (const { layout } of dayLayouts) {
-    for (const { s, e } of layout) {
-      minH = Math.min(minH, Math.floor(s / 60));
-      maxH = Math.max(maxH, Math.ceil(e / 60));
-    }
-  }
-  minH = Math.max(0, minH);
-  maxH = Math.min(24, maxH);
+  /* Fixed hour range: sempre mostra das 6h às 23h, para os horários na
+     lateral ficarem padronizados em todas as semanas (antes era adaptativo
+     e mudava de semana pra semana dependendo dos eventos). */
+  const minH = 6, maxH = 24;
   const hourCount = maxH - minH;
   const HOUR_H = isTablet
     ? (hourCount <= 16 ? 56 : hourCount <= 20 ? 46 : 38)
@@ -1354,18 +1379,46 @@ function WeekView({ cursorDate, eventsByDate, selectedDate, onSelectDay, onEvent
 }
 
 /* ------------------------------------------------------------------ */
+/* Root: controla qual dos 3 usuários está logado                     */
+/* ------------------------------------------------------------------ */
+
+const CURRENT_USER_KEY = "kahlendario:currentUser";
+
+export default function KahlendarioRoot() {
+  const [userName, setUserName] = useState(() => {
+    try { return window.localStorage.getItem(CURRENT_USER_KEY) || null; } catch (e) { return null; }
+  });
+
+  const handleLogin = (name) => {
+    try { window.localStorage.setItem(CURRENT_USER_KEY, name); } catch (e) { /* ignore */ }
+    setUserName(name);
+  };
+
+  const handleSwitchUser = () => {
+    try { window.localStorage.removeItem(CURRENT_USER_KEY); } catch (e) { /* ignore */ }
+    setUserName(null);
+  };
+
+  if (!userName) return <LoginScreen onLogin={handleLogin} />;
+  // key={userName} força remontar o app ao trocar de usuário, evitando
+  // que sobre estado (eventos, filtros, etc.) do usuário anterior na tela.
+  return <CalendarApp key={userName} userName={userName} onSwitchUser={handleSwitchUser} />;
+}
+
+/* ------------------------------------------------------------------ */
 /* Day view (timeline)                                                  */
 /* ------------------------------------------------------------------ */
 
 function DayView({ dateKey, events, isLight, categoryById, onEventClick, onSlotClick }) {
   const HOUR_H = 60;
-  const hours = Array.from({ length: 24 }, (_, i) => i);
+  const START_H = 6;
+  const hours = Array.from({ length: 18 }, (_, i) => START_H + i); // 6h às 23h
 
   return (
     <div className="px-3 pt-4">
-      <div className="relative" style={{ height: HOUR_H * 24 }}>
+      <div className="relative" style={{ height: HOUR_H * hours.length }}>
         {hours.map((h) => (
-          <div key={h} className="absolute left-0 right-0 flex items-start gap-2" style={{ top: h * HOUR_H }}>
+          <div key={h} className="absolute left-0 right-0 flex items-start gap-2" style={{ top: (h - START_H) * HOUR_H }}>
             <span className={`text-[10px] w-9 text-right pt-0 ${isLight ? "text-neutral-400" : "text-neutral-500"}`}>{pad2(h)}:00</span>
             <div onClick={() => onSlotClick(`${pad2(h)}:00`)}
               className={`flex-1 border-t cursor-pointer ${isLight ? "border-neutral-200" : "border-neutral-800"}`} style={{ height: HOUR_H }} />
@@ -1375,7 +1428,7 @@ function DayView({ dateKey, events, isLight, categoryById, onEventClick, onSlotC
         {events.map((ev) => {
           const start = timeToMinutes(ev.startTime);
           const end = Math.max(timeToMinutes(ev.endTime), start + 20);
-          const top = (start / 60) * HOUR_H;
+          const top = ((start / 60) - START_H) * HOUR_H;
           const height = ((end - start) / 60) * HOUR_H - 3;
           const c = colorOf(ev.color);
           return (
