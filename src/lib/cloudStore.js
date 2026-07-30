@@ -17,21 +17,36 @@ function readLocalCache(userName) {
   return null;
 }
 
-function writeLocalCache(userName, data) {
+// dirty=true marca que esse snapshot local ainda não foi confirmado no
+// Supabase (por exemplo, a aba foi recarregada antes do debounce de envio
+// disparar). Enquanto estiver dirty, o load deve preferir o cache local em
+// vez do que está no Supabase, senão a mudança mais recente "some".
+function writeLocalCache(userName, data, dirty) {
   try {
-    window.localStorage.setItem(cacheKey(userName), JSON.stringify(data));
+    window.localStorage.setItem(
+      cacheKey(userName),
+      JSON.stringify({ ...data, dirty })
+    );
   } catch (e) {
     /* ignore */
   }
 }
 
 /**
- * Carrega { events, categories } do usuário informado direto do Supabase.
- * Se a rede falhar, cai para o último snapshot salvo localmente nesse
- * dispositivo (modo somente-leitura até a conexão voltar).
- * Retorna null se o usuário ainda não tem nenhum dado salvo.
+ * Carrega { events, categories } do usuário informado.
+ * Se existir um cache local ainda não sincronizado (dirty), ele tem
+ * prioridade sobre o Supabase — e uma sincronização é tentada em seguida.
+ * Se a rede falhar, cai para o último snapshot salvo localmente.
+ * Retorna null se o usuário ainda não tem nenhum dado salvo em lugar nenhum.
  */
 export async function loadUserData(userName) {
+  const cached = readLocalCache(userName);
+  if (cached && cached.dirty) {
+    // Tenta sincronizar em segundo plano, sem bloquear o carregamento.
+    saveUserData(userName, { events: cached.events, categories: cached.categories });
+    return cached;
+  }
+
   try {
     const { data, error } = await supabase
       .from(TABLE)
@@ -42,23 +57,26 @@ export async function loadUserData(userName) {
     if (error) throw error;
 
     if (data) {
-      writeLocalCache(userName, data);
+      writeLocalCache(userName, data, false);
       return data;
     }
-    return null;
+    return cached;
   } catch (err) {
     console.error("[kahlendario] Falha ao carregar do Supabase, usando cache local:", err);
-    return readLocalCache(userName);
+    return cached;
   }
+}
+
+// Grava o cache local IMEDIATAMENTE (sem debounce) a cada mudança, marcado
+// como "dirty" até que saveUserData confirme a gravação no Supabase.
+export function cacheUserDataLocally(userName, data) {
+  writeLocalCache(userName, data, true);
 }
 
 /**
  * Salva (upsert) { events, categories } do usuário no Supabase.
- * Sempre grava também um cache local, para não perder a alteração caso
- * a requisição falhe por instabilidade de rede.
  */
 export async function saveUserData(userName, { events, categories }) {
-  writeLocalCache(userName, { events, categories });
   try {
     const { error } = await supabase.from(TABLE).upsert(
       {
@@ -70,6 +88,7 @@ export async function saveUserData(userName, { events, categories }) {
       { onConflict: "user_name" }
     );
     if (error) throw error;
+    writeLocalCache(userName, { events, categories }, false);
     return true;
   } catch (err) {
     console.error("[kahlendario] Falha ao salvar no Supabase (guardado localmente):", err);

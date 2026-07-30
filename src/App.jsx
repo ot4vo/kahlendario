@@ -5,7 +5,7 @@ import {
   Download, Upload, Menu, ChevronDown, ChevronUp, CalendarDays, ArrowLeft, Palette, LogOut
 } from "lucide-react";
 import LoginScreen from "./LoginScreen.jsx";
-import { loadUserData, saveUserData } from "./lib/cloudStore.js";
+import { loadUserData, saveUserData, cacheUserDataLocally } from "./lib/cloudStore.js";
 
 /* ------------------------------------------------------------------ */
 /* Constants                                                          */
@@ -467,9 +467,24 @@ function CalendarApp({ userName, onSwitchUser }) {
     return () => { cancelled = true; };
   }, [userName]);
 
-  // Salva no Supabase com um pequeno debounce, para não disparar uma
-  // requisição a cada tecla digitada. Também grava um cache local, então
-  // uma falha de rede momentânea não perde a alteração.
+  // Cache local: grava IMEDIATAMENTE a cada mudança (sem debounce), para
+  // que fechar/recarregar a aba logo após editar nunca perca o dado —
+  // mesmo que a sincronização com o Supabase ainda não tenha disparado.
+  // Pula a primeira execução após um load (esse dado já veio do próprio
+  // Supabase/cache, não é uma mudança nova do usuário).
+  const justLoadedRef = useRef(false);
+  useEffect(() => {
+    if (loaded) justLoadedRef.current = true;
+  }, [loaded, userName]);
+  useEffect(() => {
+    if (!loaded) return;
+    if (justLoadedRef.current) { justLoadedRef.current = false; return; }
+    cacheUserDataLocally(userName, { events, categories });
+  }, [events, categories, loaded, userName]);
+
+  // Envia pro Supabase com um pequeno debounce, para não disparar uma
+  // requisição a cada tecla digitada. O cache local (acima) já garante que
+  // nada se perde mesmo se a aba fechar antes deste timer disparar.
   const saveTimer = useRef(null);
   useEffect(() => {
     if (!loaded) return;
